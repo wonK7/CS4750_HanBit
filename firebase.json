@@ -1,0 +1,30 @@
+{
+  "functions": [
+    {
+      "source": "functions"
+    }
+  ],
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "hanbit-118ad",
+          "appId": "1:367392130289:android:c938f9de6fcbfac3f61550",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "hanbit-118ad",
+          "configurations": {
+            "android": "1:367392130289:android:c938f9de6fcbfac3f61550",
+            "ios": "1:367392130289:ios:52cad6c408079117f61550",
+            "macos": "1:367392130289:ios:52cad6c408079117f61550",
+            "web": "1:367392130289:web:b7ac0851e7bffcebf61550",
+            "windows": "1:367392130289:web:ff3445565a4605a8f61550"
+          }
+        }
+      }
+    }
+  }
+}

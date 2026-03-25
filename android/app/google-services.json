@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "367392130289",
+    "project_id": "hanbit-118ad",
+    "storage_bucket": "hanbit-118ad.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:367392130289:android:c938f9de6fcbfac3f61550",
+        "android_client_info": {
+          "package_name": "com.example.hanbit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdpsgJJzUB-xT_6r_4umQsZXdDOd3oSzE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
