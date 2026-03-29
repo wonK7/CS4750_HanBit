@@ -1035,6 +1035,8 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 18),
+          _buildFiveElementExplorer(),
+          const SizedBox(height: 18),
         ],
       ),
     );
@@ -1253,8 +1255,6 @@ class _HomePageState extends State<HomePage> {
                   );
                 },
         ),
-        const SizedBox(height: 16),
-        _buildFiveElementExplorer(),
       ],
     );
   }
