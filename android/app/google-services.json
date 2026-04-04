@@ -12,7 +12,12 @@
           "package_name": "com.example.hanbit"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "367392130289-h4lk775lhoetj7chonbovf13f73rbvgk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCdpsgJJzUB-xT_6r_4umQsZXdDOd3oSzE"
@@ -20,7 +25,55 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "367392130289-h4lk775lhoetj7chonbovf13f73rbvgk.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "367392130289-qc7qgbljn8piolidgj03c3pusk4bagvm.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.testApp"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:367392130289:android:eceb75c6fad24aaef61550",
+        "android_client_info": {
+          "package_name": "com.wonk.hanbit"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "367392130289-h4lk775lhoetj7chonbovf13f73rbvgk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdpsgJJzUB-xT_6r_4umQsZXdDOd3oSzE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "367392130289-h4lk775lhoetj7chonbovf13f73rbvgk.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "367392130289-qc7qgbljn8piolidgj03c3pusk4bagvm.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.testApp"
+              }
+            }
+          ]
         }
       }
     }

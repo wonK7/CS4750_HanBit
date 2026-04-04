@@ -1,4 +1,4 @@
-package com.example.hanbit
+package com.wonk.hanbit
 
 import io.flutter.embedding.android.FlutterActivity
 
