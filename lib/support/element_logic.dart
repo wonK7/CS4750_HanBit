@@ -58,7 +58,7 @@ const recommendationData = {
     'support': {
       'explanation':
           'You may feel busy helping the day move forward. Protect your focus so your energy does not scatter.',
-      'k': ['Perilla leaf tea', 'Rice porridge'],
+      'k': ['Ginger tea', 'Rice porridge'],
       'global': ['Warm lemon water', 'Whole grains'],
       'supplement': ['Magnesium', 'Multivitamin'],
       'avoid': ['Overworking', 'Too much caffeine'],
@@ -134,7 +134,7 @@ const recommendationData = {
     'control': {
       'explanation':
           'Earth is trying to stabilize a day that resists structure. Keep things simple and practical.',
-      'k': ['Lotus root tea', 'Steamed squash'],
+      'k': ['Jujube tea', 'Steamed squash'],
       'global': ['Herbal tea', 'Simple proteins'],
       'supplement': ['Zinc', 'Magnesium'],
       'avoid': ['Perfectionism', 'Decision fatigue'],
@@ -177,7 +177,7 @@ const recommendationData = {
       'explanation':
           'Your Metal energy may feel restricted today. Give yourself more room, rest, and clean breathing space.',
       'k': ['Warm pear juice', 'Seaweed rice'],
-      'global': ['Eucalyptus tea', 'Simple hydration'],
+      'global': ['Warm herbal tea', 'Simple hydration'],
       'supplement': ['Vitamin C', 'Magnesium'],
       'avoid': ['Dry foods', 'Holding everything in'],
     },

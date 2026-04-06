@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../support/element_logic.dart';
+import '../support/profile_options.dart';
 import 'home_page.dart';
 
 class SignUpPage extends StatefulWidget {
@@ -20,6 +22,11 @@ class _SignUpPageState extends State<SignUpPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _isLoading = false;
+  DateTime? _birthDate;
+  String _birthDateLabel = '';
+  String _birthTimeLabel = '';
+  final List<String> _personalityTraits = <String>[];
+  final List<String> _stressTriggers = <String>[];
 
   bool _isValidPassword(String password) {
     final hasMinLength = password.length >= 8;
@@ -60,6 +67,21 @@ class _SignUpPageState extends State<SignUpPage> {
       return;
     }
 
+    if (_birthDate == null || _birthTimeLabel.isEmpty) {
+      _showMessage('Please choose both your birth date and birth time.');
+      return;
+    }
+
+    if (_personalityTraits.length != 3) {
+      _showMessage('Please choose exactly 3 personality traits.');
+      return;
+    }
+
+    if (_stressTriggers.length != 2) {
+      _showMessage('Please choose exactly 2 stress patterns.');
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -68,6 +90,7 @@ class _SignUpPageState extends State<SignUpPage> {
       final credential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: email, password: password);
 
+      final userElement = getUserElementFromBirthdate(_birthDate!);
       await FirebaseFirestore.instance
           .collection('users')
           .doc(credential.user!.uid)
@@ -75,6 +98,12 @@ class _SignUpPageState extends State<SignUpPage> {
             'firstName': firstName,
             'lastName': lastName,
             'email': email,
+            'birthDate': Timestamp.fromDate(_birthDate!),
+            'birthTime': _birthTimeLabel,
+            'userElement': formatElement(userElement),
+            'symbol': displayElementIcon(userElement, '☯'),
+            'personalityTraits': _personalityTraits,
+            'stressTriggers': _stressTriggers,
             'createdAt': FieldValue.serverTimestamp(),
           });
 
@@ -105,6 +134,55 @@ class _SignUpPageState extends State<SignUpPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _pickBirthDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(2000),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+    );
+    if (picked == null) {
+      return;
+    }
+    setState(() {
+      _birthDate = picked;
+      _birthDateLabel = formatBirthDate(picked);
+    });
+  }
+
+  Future<void> _pickBirthTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 7, minute: 0),
+    );
+    if (picked == null) {
+      return;
+    }
+    setState(() {
+      _birthTimeLabel = formatBirthTime(picked);
+    });
+  }
+
+  void _toggleTrait(String option) {
+    setState(() {
+      if (_personalityTraits.contains(option)) {
+        _personalityTraits.remove(option);
+      } else if (_personalityTraits.length < 3) {
+        _personalityTraits.add(option);
+      }
+    });
+  }
+
+  void _toggleStressTrigger(String option) {
+    setState(() {
+      if (_stressTriggers.contains(option)) {
+        _stressTriggers.remove(option);
+      } else if (_stressTriggers.length < 2) {
+        _stressTriggers.add(option);
+      }
+    });
   }
 
   @override
@@ -153,6 +231,132 @@ class _SignUpPageState extends State<SignUpPage> {
                     ),
                     prefixIcon: const Icon(
                       Icons.person,
+                      color: Color(0xFF789288),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                OutlinedButton(
+                  onPressed: _pickBirthDate,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF2C2C2C),
+                    backgroundColor: Colors.white.withOpacity(0.8),
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    side: BorderSide.none,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                  ),
+                  child: Text(
+                    _birthDateLabel.isEmpty
+                        ? 'Choose Birth Date'
+                        : 'Birth Date: $_birthDateLabel',
+                  ),
+                ),
+                const SizedBox(height: 15),
+                OutlinedButton(
+                  onPressed: _pickBirthTime,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF2C2C2C),
+                    backgroundColor: Colors.white.withOpacity(0.8),
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    side: BorderSide.none,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                  ),
+                  child: Text(
+                    _birthTimeLabel.isEmpty
+                        ? 'Choose Birth Time'
+                        : 'Birth Time: $_birthTimeLabel',
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Which 3 traits describe you best?',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF2C2C2C),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: personalityTraitOptions
+                      .map((option) {
+                        final selected = _personalityTraits.contains(option);
+                        return FilterChip(
+                          label: Text(option),
+                          selected: selected,
+                          onSelected: (_) => _toggleTrait(option),
+                          selectedColor: const Color(0xFFE9E2D2),
+                          checkmarkColor: const Color(0xFF2C2C2C),
+                          side: BorderSide(
+                            color: selected
+                                ? const Color(0xFF789288)
+                                : const Color(0xFFD8CFC1),
+                          ),
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${_personalityTraits.length}/3 selected',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF789288),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Which 2 patterns tend to throw you off most?',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF2C2C2C),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: stressTriggerOptions
+                      .map((option) {
+                        final selected = _stressTriggers.contains(option);
+                        return FilterChip(
+                          label: Text(option),
+                          selected: selected,
+                          onSelected: (_) => _toggleStressTrigger(option),
+                          selectedColor: const Color(0xFFF2E8E4),
+                          checkmarkColor: const Color(0xFF2C2C2C),
+                          side: BorderSide(
+                            color: selected
+                                ? const Color(0xFFC0846B)
+                                : const Color(0xFFD8CFC1),
+                          ),
+                        );
+                      })
+                      .toList(growable: false),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${_stressTriggers.length}/2 selected',
+                    style: const TextStyle(
+                      fontSize: 12,
                       color: Color(0xFF789288),
                     ),
                   ),

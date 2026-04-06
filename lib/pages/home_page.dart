@@ -7,13 +7,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/update_notice_service.dart';
 import '../support/element_logic.dart';
 import '../support/engagement_logic.dart';
 import '../support/assistant_service.dart';
+import '../support/profile_options.dart';
 import 'login_page.dart';
 import 'signup_page.dart';
 
@@ -31,6 +34,30 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  static const List<String> _weekdayNames = <String>[
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+  static const List<String> _monthNames = <String>[
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
   final TextEditingController _assistantController = TextEditingController();
   final List<_AssistantMessage> _assistantMessages = [];
   final GlobalKey _todayShareKey = GlobalKey();
@@ -55,21 +82,32 @@ class _HomePageState extends State<HomePage> {
   bool _loadingProfile = false;
   bool _syncingProgress = false;
   bool _assistantIsThinking = false;
+  bool _unlockingWeeklyReading = false;
+  bool _unlockingMonthlyReading = false;
   bool _coinBurstVisible = false;
   int _coinBurstReward = 0;
   AppProgress _progress = AppProgress.empty(DateTime.now());
   OhaengElement _selectedGuideElement = OhaengElement.wood;
+  List<String> _personalityTraits = <String>[];
+  List<String> _stressTriggers = <String>[];
+  UpdateStatus? _updateStatus;
+  bool _loadingUpdateStatus = false;
+  bool _homeUpdateBannerDismissed = false;
+  bool _updateNoticeSeen = false;
+  bool _forceUpdateDialogVisible = false;
 
   static const Color _mutedTextColor = _globalMutedTextColor;
   static const Color _secondaryTextColor = _globalSecondaryTextColor;
   final AssistantService _assistantService = AssistantService();
+  final UpdateNoticeService _updateNoticeService = UpdateNoticeService();
 
   bool get _isGuestUser => FirebaseAuth.instance.currentUser == null;
   int get _assistantLimit => _isGuestUser ? 1 : 3;
-  int get _assistantRemaining =>
-      (_assistantLimit - _progress.assistantUsedCount).clamp(0, _assistantLimit)
-          as int;
   int get _assistantUsedCount => _progress.assistantUsedCount;
+  bool get _showHomeUpdateBanner =>
+      (_updateStatus?.hasUpdate ?? false) && !_homeUpdateBannerDismissed;
+  bool get _hasUnreadUpdateNotice =>
+      (_updateStatus?.hasUpdate ?? false) && !_updateNoticeSeen;
 
   @override
   void initState() {
@@ -77,6 +115,7 @@ class _HomePageState extends State<HomePage> {
     displayFirstName = widget.firstName;
     todayElement = getTodayElement();
     _loadMemberProfile();
+    _loadUpdateStatus();
   }
 
   @override
@@ -105,10 +144,19 @@ class _HomePageState extends State<HomePage> {
           final firstName = (remoteData['firstName'] as String?)?.trim();
           final savedBirthDate = remoteData['birthDate'] as Timestamp?;
           final savedBirthTime = remoteData['birthTime'] as String?;
+          final personalityTraits = _stringListFromDynamic(
+            remoteData['personalityTraits'],
+          );
+          final stressTriggers = _stringListFromDynamic(
+            remoteData['stressTriggers'],
+          );
 
           if (firstName != null && firstName.isNotEmpty) {
             displayFirstName = firstName;
           }
+
+          _personalityTraits = personalityTraits;
+          _stressTriggers = stressTriggers;
 
           if (savedBirthDate != null &&
               savedBirthTime != null &&
@@ -129,6 +177,160 @@ class _HomePageState extends State<HomePage> {
         });
       }
     }
+  }
+
+  Future<void> _loadUpdateStatus() async {
+    setState(() {
+      _loadingUpdateStatus = true;
+    });
+
+    try {
+      final status = await _updateNoticeService.loadStatus();
+      final prefs = await SharedPreferences.getInstance();
+      final latestVersion = status.latestVersion?.trim() ?? '';
+      final updateSeen =
+          latestVersion.isNotEmpty &&
+          prefs.getBool(_updateSeenStorageKey(latestVersion)) == true;
+      final bannerDismissed =
+          latestVersion.isNotEmpty &&
+          prefs.getBool(_updateBannerStorageKey(latestVersion)) == true;
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _updateStatus = status;
+        _updateNoticeSeen = updateSeen;
+        _homeUpdateBannerDismissed = bannerDismissed;
+      });
+
+      if (status.requiresForceUpdate) {
+        _showForceUpdateDialog();
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingUpdateStatus = false;
+        });
+      }
+    }
+  }
+
+  String _updateSeenStorageKey(String version) => 'update_seen_$version';
+
+  String _updateBannerStorageKey(String version) => 'update_banner_$version';
+
+  Future<void> _markUpdateNoticeSeen() async {
+    final latestVersion = _updateStatus?.latestVersion?.trim() ?? '';
+    if (latestVersion.isEmpty || _updateNoticeSeen) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_updateSeenStorageKey(latestVersion), true);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _updateNoticeSeen = true;
+    });
+  }
+
+  Future<void> _dismissHomeUpdateBanner() async {
+    final latestVersion = _updateStatus?.latestVersion?.trim() ?? '';
+    if (latestVersion.isEmpty) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_updateBannerStorageKey(latestVersion), true);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _homeUpdateBannerDismissed = true;
+    });
+  }
+
+  Future<void> _openStoreListing() async {
+    final status = _updateStatus;
+    if (status == null) {
+      return;
+    }
+
+    final primaryUri = Uri.parse(status.effectivePlayStoreUrl);
+    final marketUri = Uri.parse('market://details?id=${status.packageName}');
+    var launched = false;
+
+    if (!kIsWeb && Theme.of(context).platform == TargetPlatform.android) {
+      launched = await launchUrl(
+        marketUri,
+        mode: LaunchMode.externalApplication,
+      );
+    }
+
+    if (!launched) {
+      launched = await launchUrl(
+        primaryUri,
+        mode: LaunchMode.externalApplication,
+      );
+    }
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open Google Play right now.')),
+      );
+    }
+  }
+
+  Future<void> _showForceUpdateDialog() async {
+    if (!mounted || _forceUpdateDialogVisible) {
+      return;
+    }
+
+    _forceUpdateDialogVisible = true;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final status = _updateStatus;
+        return AlertDialog(
+          backgroundColor: const Color(0xFFFFFBF5),
+          title: const Text('Update Required'),
+          content: Text(
+            status?.message ??
+                'A newer version is required to keep using HanBit.',
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.45,
+              color: Color(0xFF5A5145),
+            ),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: _openStoreListing,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2C2C2C),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Open Google Play'),
+            ),
+          ],
+        );
+      },
+    );
+
+    _forceUpdateDialogVisible = false;
   }
 
   Future<void> _loadStoredProgress({Map<String, dynamic>? remoteData}) async {
@@ -376,6 +578,28 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    setState(() {
+      _unlockingWeeklyReading = true;
+    });
+
+    String? generatedReading;
+    try {
+      generatedReading = await _assistantService.generatePremiumReading(
+        readingType: 'weekly',
+        firstName: displayFirstName,
+        birthDate: birthDateLabel,
+        birthTime: birthTimeLabel,
+        userElement: userElement == null ? '' : formatElement(userElement!),
+        todayElement: formatElement(todayElement),
+        timezoneLabel: _locationHint,
+        currentDateLabel: _formattedTodayLine(),
+        personalityTraits: _personalityTraits,
+        stressTriggers: _stressTriggers,
+      );
+    } catch (_) {
+      generatedReading = null;
+    }
+
     final result = unlockWeeklyReading(
       rawProgress: _progress,
       now: DateTime.now(),
@@ -383,10 +607,12 @@ class _HomePageState extends State<HomePage> {
       todayElement: todayElement,
       birthTimeLabel: birthTimeLabel,
       locationHint: _locationHint,
+      generatedReading: generatedReading,
     );
 
     setState(() {
       _progress = result.progress;
+      _unlockingWeeklyReading = false;
     });
     await _persistProgress();
 
@@ -412,6 +638,28 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    setState(() {
+      _unlockingMonthlyReading = true;
+    });
+
+    String? generatedReading;
+    try {
+      generatedReading = await _assistantService.generatePremiumReading(
+        readingType: 'monthly',
+        firstName: displayFirstName,
+        birthDate: birthDateLabel,
+        birthTime: birthTimeLabel,
+        userElement: userElement == null ? '' : formatElement(userElement!),
+        todayElement: formatElement(todayElement),
+        timezoneLabel: _locationHint,
+        currentDateLabel: _formattedTodayLine(),
+        personalityTraits: _personalityTraits,
+        stressTriggers: _stressTriggers,
+      );
+    } catch (_) {
+      generatedReading = null;
+    }
+
     final result = unlockMonthlyReading(
       rawProgress: _progress,
       now: DateTime.now(),
@@ -419,10 +667,12 @@ class _HomePageState extends State<HomePage> {
       todayElement: todayElement,
       birthTimeLabel: birthTimeLabel,
       locationHint: _locationHint,
+      generatedReading: generatedReading,
     );
 
     setState(() {
       _progress = result.progress;
+      _unlockingMonthlyReading = false;
     });
     await _persistProgress();
 
@@ -438,6 +688,20 @@ class _HomePageState extends State<HomePage> {
   Future<void> _sendAssistantQuestion() async {
     final question = _assistantController.text.trim();
     if (question.isEmpty) {
+      return;
+    }
+
+    final normalizedProgress = normalizeProgress(_progress, DateTime.now());
+    if (normalizedProgress.assistantUsedCount >= _assistantLimit) {
+      final message = _isGuestUser
+          ? 'Guest access allows one question each day. Sign in for three guided questions.'
+          : 'You have used all three assistant questions for today. Come back tomorrow for more guidance.';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+      setState(() {
+        _progress = normalizedProgress;
+      });
       return;
     }
 
@@ -470,6 +734,9 @@ class _HomePageState extends State<HomePage> {
         userElement: userElement == null ? '' : formatElement(userElement!),
         todayElement: formatElement(todayElement),
         isGuest: _isGuestUser,
+        personalityTraits: _personalityTraits,
+        stressTriggers: _stressTriggers,
+        conversationHistory: _recentAssistantHistory(),
       );
     } catch (_) {
       answer = result.answer;
@@ -481,6 +748,20 @@ class _HomePageState extends State<HomePage> {
       _assistantIsThinking = false;
     });
     await _persistProgress();
+  }
+
+  List<Map<String, String>> _recentAssistantHistory() {
+    final history = _assistantMessages.length > 6
+        ? _assistantMessages.sublist(_assistantMessages.length - 6)
+        : List<_AssistantMessage>.from(_assistantMessages);
+    return history
+        .map(
+          (message) => <String, String>{
+            'role': message.isUser ? 'user' : 'assistant',
+            'content': message.content,
+          },
+        )
+        .toList(growable: false);
   }
 
   Future<void> _shareReadingCard({
@@ -538,6 +819,7 @@ class _HomePageState extends State<HomePage> {
 
   String _todayShareText() {
     return 'HanBit Today Guide\n'
+        '${_formattedTodayLine()}\n'
         '$myEnergy\n'
         'Today\'s element: ${formatElement(todayElement)}\n'
         '${_hanBitMessage()}';
@@ -563,6 +845,8 @@ class _HomePageState extends State<HomePage> {
     DateTime? draftBirthDate = birthDate;
     String draftBirthDateLabel = birthDateLabel;
     String draftBirthTimeLabel = birthTimeLabel;
+    final draftPersonalityTraits = List<String>.from(_personalityTraits);
+    final draftStressTriggers = List<String>.from(_stressTriggers);
 
     final shouldSave = await showDialog<bool>(
       context: context,
@@ -636,6 +920,124 @@ class _HomePageState extends State<HomePage> {
                             : 'Birth Time: $draftBirthTimeLabel',
                       ),
                     ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Which traits describe you best?',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2C2C2C),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: personalityTraitOptions
+                          .map((option) {
+                            final selected = draftPersonalityTraits.contains(
+                              option,
+                            );
+                            return FilterChip(
+                              label: Text(option),
+                              selected: selected,
+                              onSelected: (value) {
+                                setDialogState(() {
+                                  if (value) {
+                                    if (draftPersonalityTraits.length < 3) {
+                                      draftPersonalityTraits.add(option);
+                                    }
+                                  } else {
+                                    draftPersonalityTraits.remove(option);
+                                  }
+                                });
+                              },
+                              selectedColor: const Color(0xFFE9E2D2),
+                              checkmarkColor: const Color(0xFF2C2C2C),
+                              side: BorderSide(
+                                color: selected
+                                    ? const Color(0xFF789288)
+                                    : const Color(0xFFD8CFC1),
+                              ),
+                              labelStyle: TextStyle(
+                                color: selected
+                                    ? const Color(0xFF2C2C2C)
+                                    : const Color(0xFF5A5145),
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            );
+                          })
+                          .toList(growable: false),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${draftPersonalityTraits.length}/3 selected (optional)',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: _mutedTextColor,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Which patterns tend to throw you off most?',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2C2C2C),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: stressTriggerOptions
+                          .map((option) {
+                            final selected = draftStressTriggers.contains(
+                              option,
+                            );
+                            return FilterChip(
+                              label: Text(option),
+                              selected: selected,
+                              onSelected: (value) {
+                                setDialogState(() {
+                                  if (value) {
+                                    if (draftStressTriggers.length < 2) {
+                                      draftStressTriggers.add(option);
+                                    }
+                                  } else {
+                                    draftStressTriggers.remove(option);
+                                  }
+                                });
+                              },
+                              selectedColor: const Color(0xFFF2E8E4),
+                              checkmarkColor: const Color(0xFF2C2C2C),
+                              side: BorderSide(
+                                color: selected
+                                    ? const Color(0xFFC0846B)
+                                    : const Color(0xFFD8CFC1),
+                              ),
+                              labelStyle: TextStyle(
+                                color: selected
+                                    ? const Color(0xFF2C2C2C)
+                                    : const Color(0xFF5A5145),
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            );
+                          })
+                          .toList(growable: false),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${draftStressTriggers.length}/2 selected (optional)',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: _mutedTextColor,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -689,13 +1091,37 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    if (draftPersonalityTraits.length > 3) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose up to 3 personality traits.')),
+      );
+      return;
+    }
+
+    if (draftStressTriggers.length > 2) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose up to 2 stress patterns.')),
+      );
+      return;
+    }
+
     try {
       setState(() {
         displayFirstName = nextName;
+        _personalityTraits = List<String>.from(draftPersonalityTraits);
+        _stressTriggers = List<String>.from(draftStressTriggers);
       });
 
       final updateData = <String, dynamic>{
         'firstName': nextName,
+        'personalityTraits': draftPersonalityTraits,
+        'stressTriggers': draftStressTriggers,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
@@ -807,12 +1233,15 @@ class _HomePageState extends State<HomePage> {
           setState(() {
             _selectedIndex = index;
           });
+          if (index == 3) {
+            _markUpdateNoticeSeen();
+          }
         },
         selectedItemColor: const Color(0xFF2C2C2C),
         unselectedItemColor: const Color(0xFF789288),
         backgroundColor: Colors.white,
         type: BottomNavigationBarType.fixed,
-        items: const [
+        items: [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_rounded),
             label: 'Home',
@@ -826,7 +1255,26 @@ class _HomePageState extends State<HomePage> {
             label: 'Assistant',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.person_rounded),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.person_rounded),
+                if (_hasUnreadUpdateNotice)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFC44B3D),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Colors.white, width: 1.4),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             label: 'Profile',
           ),
         ],
@@ -835,6 +1283,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildHomeTab() {
+    final now = DateTime.now();
+
     return SingleChildScrollView(
       key: const ValueKey('home-tab'),
       physics: const BouncingScrollPhysics(
@@ -844,6 +1294,10 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_showHomeUpdateBanner) ...[
+            _buildUpdateBanner(),
+            const SizedBox(height: 16),
+          ],
           Row(
             children: [
               Text(
@@ -931,6 +1385,44 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: energyAccent.withValues(alpha: 0.14),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _formattedTodayLine(now),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF2C2C2C),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _localTimeContext(now),
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.4,
+                            color: energyAccent.withValues(alpha: 0.88),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   Text(
                     'Today\'s Element: ${formatElement(todayElement)} ${displayElementIcon(todayElement, '')}',
                     style: TextStyle(
@@ -1222,7 +1714,7 @@ class _HomePageState extends State<HomePage> {
           cost: 50,
           accent: const Color(0xFFE6DCC8),
           buttonLabel: 'Unlock Weekly Reading',
-          onPressed: _unlockWeeklyReading,
+          onPressed: _unlockingWeeklyReading ? null : _unlockWeeklyReading,
           onShare: _progress.weeklyReading == null
               ? null
               : () {
@@ -1232,6 +1724,7 @@ class _HomePageState extends State<HomePage> {
                     subject: 'hanbit_weekly_reading',
                   );
                 },
+          isLoading: _unlockingWeeklyReading,
         ),
         const SizedBox(height: 16),
         _buildUnlockCard(
@@ -1242,7 +1735,7 @@ class _HomePageState extends State<HomePage> {
           cost: 180,
           accent: const Color(0xFFF1E1C7),
           buttonLabel: 'Unlock Monthly Reading',
-          onPressed: _unlockMonthlyReading,
+          onPressed: _unlockingMonthlyReading ? null : _unlockMonthlyReading,
           onShare: _progress.monthlyReading == null
               ? null
               : () {
@@ -1252,6 +1745,7 @@ class _HomePageState extends State<HomePage> {
                     subject: 'hanbit_monthly_reading',
                   );
                 },
+          isLoading: _unlockingMonthlyReading,
         ),
         const SizedBox(height: 16),
         _buildFiveElementExplorer(),
@@ -1267,8 +1761,9 @@ class _HomePageState extends State<HomePage> {
     required int cost,
     required Color accent,
     required String buttonLabel,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     required VoidCallback? onShare,
+    required bool isLoading,
   }) {
     final lockedText = title == 'Weekly Reading'
         ? 'Unlock a short AI-style weekly energy reading. It uses your birth profile and current local rhythm.'
@@ -1359,7 +1854,16 @@ class _HomePageState extends State<HomePage> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  child: Text(buttonLabel),
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(buttonLabel),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1386,6 +1890,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGuideSummaryCard() {
+    final detailContent = _todayDetailContent();
     final profileMood = userElement == null
         ? 'Balanced, thoughtful, and open to insight'
         : _elementMoodLine(userElement!);
@@ -1393,18 +1898,73 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF4E5),
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFF7EB), Color(0xFFF1E3CA)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE0CFB2)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6F5A40).withValues(alpha: 0.08),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Today Guide Details',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF2C2C2C),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _InfoChip(
+                icon: Icons.calendar_today_rounded,
+                label: _formattedTodayLine(),
+              ),
+              _InfoChip(icon: Icons.schedule_rounded, label: _locationHint),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFE6D2AE)),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  displayElementIcon(todayElement, ''),
+                  style: const TextStyle(fontSize: 24),
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Text(
+                  'Today Guide Details',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2C2C2C),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            detailContent.headline,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF3D3328),
             ),
           ),
           const SizedBox(height: 10),
@@ -1426,32 +1986,103 @@ class _HomePageState extends State<HomePage> {
               style: const TextStyle(fontSize: 15, color: _mutedTextColor),
             ),
           ],
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2C2C2C),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Day pulse',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  recommendation['explanation'] as String? ?? _hanBitMessage(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    height: 1.45,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  detailContent.focus,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 14,
+                    height: 1.55,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _HighlightPanel(
+                  title: 'Focus',
+                  value: detailContent.focusLabel,
+                  accentColor: const Color(0xFF976B2D),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _HighlightPanel(
+                  title: 'Ritual',
+                  value: detailContent.ritualLabel,
+                  accentColor: const Color(0xFF6E8578),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
           _GuideCard(
             icon: Icons.restaurant,
             title: 'K-Food',
             description: joinItems(recommendation['k'] as List<String>),
-            backgroundColor: Colors.white,
+            backgroundColor: Colors.white.withValues(alpha: 0.88),
           ),
           _GuideCard(
             icon: Icons.self_improvement,
             title: 'Global Wellness',
             description: joinItems(recommendation['global'] as List<String>),
-            backgroundColor: Colors.white,
+            backgroundColor: Colors.white.withValues(alpha: 0.88),
           ),
           _GuideCard(
             icon: Icons.medication_outlined,
-            title: 'Supplements',
+            title: 'Daily Support',
             description: joinItems(
               recommendation['supplement'] as List<String>,
             ),
-            backgroundColor: Colors.white,
+            backgroundColor: Colors.white.withValues(alpha: 0.88),
           ),
           _GuideCard(
             icon: Icons.do_not_disturb_on_outlined,
             title: 'Avoid',
             description: joinItems(recommendation['avoid'] as List<String>),
-            backgroundColor: Colors.white,
+            backgroundColor: Colors.white.withValues(alpha: 0.88),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            detailContent.ritual,
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: Color(0xFF6C5F50),
+            ),
           ),
         ],
       ),
@@ -1770,7 +2401,8 @@ class _HomePageState extends State<HomePage> {
                 minLines: 1,
                 maxLines: 3,
                 decoration: InputDecoration(
-                  hintText: 'Ask HanBit Assistant...',
+                  hintText:
+                      'Ask about today\'s luck, mood, focus, relationships, or health rhythm...',
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -1803,8 +2435,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildProfileTab() {
+    final updateStatus = _updateStatus;
+
     return ListView(
       key: const ValueKey('profile-tab'),
+      padding: const EdgeInsets.only(bottom: 24),
       children: [
         Container(
           padding: const EdgeInsets.all(24),
@@ -1866,6 +2501,54 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ],
+              const SizedBox(height: 12),
+              const Text(
+                'My traits',
+                style: TextStyle(fontSize: 14, color: _mutedTextColor),
+              ),
+              const SizedBox(height: 8),
+              if (_personalityTraits.isEmpty)
+                const Text(
+                  'Choose 3 traits in Edit Profile so HanBit can personalize your guidance more clearly.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: Color(0xFF8B7D68),
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _personalityTraits
+                      .map((trait) => _buildProfileTag(trait))
+                      .toList(growable: false),
+                ),
+              const SizedBox(height: 12),
+              const Text(
+                'What throws me off',
+                style: TextStyle(fontSize: 14, color: _mutedTextColor),
+              ),
+              const SizedBox(height: 8),
+              if (_stressTriggers.isEmpty)
+                const Text(
+                  'Choose 2 patterns in Edit Profile so HanBit can understand when your rhythm gets disrupted.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: Color(0xFF8B7D68),
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _stressTriggers
+                      .map(
+                        (trigger) => _buildProfileTag(trigger, warning: true),
+                      )
+                      .toList(growable: false),
+                ),
               const SizedBox(height: 24),
               if (_isGuestUser) ...[
                 SizedBox(
@@ -1945,8 +2628,303 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        _buildProfileUpdateCard(updateStatus),
       ],
     );
+  }
+
+  Widget _buildUpdateBanner() {
+    final status = _updateStatus;
+    if (status == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF6E6),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE1C48A), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.system_update_alt_rounded,
+                color: Color(0xFF7A5B14),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  status.title ?? 'A new version is available',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2C2C2C),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            status.message ??
+                'Update from Google Play to get the latest fixes and features.',
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.45,
+              color: Color(0xFF5A5145),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _openStoreListing,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2C2C2C),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text('Update in Google Play'),
+                ),
+              ),
+              if (!(status.requiresForceUpdate)) ...[
+                const SizedBox(width: 10),
+                TextButton(
+                  onPressed: _dismissHomeUpdateBanner,
+                  style: TextButton.styleFrom(
+                    foregroundColor: _secondaryTextColor,
+                  ),
+                  child: const Text('Later'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileUpdateCard(UpdateStatus? status) {
+    final notices = status?.notices ?? const <UpdateNotice>[];
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.notifications_active_outlined,
+                color: Color(0xFF789288),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Update Notifications',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2C2C2C),
+                  ),
+                ),
+              ),
+              if (_hasUnreadUpdateNotice)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEFE9),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'New',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFC44B3D),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_loadingUpdateStatus) ...[
+            const SizedBox(height: 10),
+            const Text(
+              'Checking for the latest release...',
+              style: TextStyle(fontSize: 14, color: _mutedTextColor),
+            ),
+          ] else if (status == null) ...[
+            const SizedBox(height: 10),
+            const Text(
+              'Update notices are unavailable right now.',
+              style: TextStyle(fontSize: 14, color: _mutedTextColor),
+            ),
+          ] else ...[
+            const SizedBox(height: 10),
+            Text(
+              status.hasUpdate
+                  ? 'A newer update is ready in Google Play.'
+                  : 'You already have the latest published update.',
+              style: const TextStyle(
+                fontSize: 14,
+                height: 1.45,
+                color: Color(0xFF5A5145),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (status.hasUpdate)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _openStoreListing,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2C2C2C),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: Text(
+                    status.requiresForceUpdate
+                        ? 'Required: Open Google Play'
+                        : 'Open Google Play',
+                  ),
+                ),
+              ),
+            if (status.hasUpdate) const SizedBox(height: 16),
+            if (notices.isEmpty)
+              const Text(
+                'No release notes have been posted yet.',
+                style: TextStyle(fontSize: 14, color: _mutedTextColor),
+              )
+            else
+              ...notices.take(3).map(_buildUpdateNoticeTile),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUpdateNoticeTile(UpdateNotice notice) {
+    final publishedLabel = _formatNoticeDate(notice.publishedAt);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F5EE),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE3DCCF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  notice.title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2C2C2C),
+                  ),
+                ),
+              ),
+              if (notice.force)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEFE9),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'Required',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFC44B3D),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (publishedLabel != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              publishedLabel,
+              style: const TextStyle(fontSize: 12, color: _mutedTextColor),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            notice.message,
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.45,
+              color: Color(0xFF5A5145),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileTag(String label, {bool warning = false}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: warning ? const Color(0xFFF4E9E4) : const Color(0xFFEAE6DE),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: warning ? const Color(0xFF8A5B4A) : const Color(0xFF5A5145),
+        ),
+      ),
+    );
+  }
+
+  String? _formatNoticeDate(DateTime? value) {
+    if (value == null) {
+      return null;
+    }
+    final month = _monthNames[value.month - 1];
+    return '$month ${value.day}, ${value.year}';
+  }
+
+  List<String> _stringListFromDynamic(Object? value) {
+    if (value is List) {
+      return value
+          .map((item) => item?.toString().trim() ?? '')
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    }
+    return const <String>[];
   }
 
   String _hanBitMessage() {
@@ -1966,6 +2944,168 @@ class _HomePageState extends State<HomePage> {
         return 'Rest is not weakness today. Gentle choices will bring your balance back faster than pressure.';
       default:
         return 'Stay present with small rituals today. Even quiet care can shift the whole mood of the day.';
+    }
+  }
+
+  String _formattedTodayLine([DateTime? now]) {
+    final current = now ?? DateTime.now();
+    final weekday = _weekdayNames[current.weekday - 1];
+    final month = _monthNames[current.month - 1];
+    return '$weekday, $month ${current.day}, ${current.year}';
+  }
+
+  String _localTimeContext([DateTime? now]) {
+    final zone = (now ?? DateTime.now()).timeZoneName.trim();
+    if (zone.isEmpty) {
+      return 'Based on your local device date and time';
+    }
+    return 'Based on your local device time ($zone)';
+  }
+
+  _TodayDetailContent _todayDetailContent() {
+    final interaction = recommendation['interaction'] as String? ?? 'neutral';
+    final now = DateTime.now();
+    if (userElement == null) {
+      final neutralVariants = _buildBalancedDetailVariants();
+      final seed =
+          now.difference(DateTime(2024, 1, 1)).inDays + _weeklyCycleSeed(now);
+      return neutralVariants[seed % neutralVariants.length];
+    }
+
+    final variants = _buildPairDetailVariants(
+      userElement: userElement!,
+      todayElement: todayElement,
+      interaction: interaction,
+      now: now,
+    );
+    final seed =
+        now.difference(DateTime(2024, 1, 1)).inDays + _weeklyCycleSeed(now);
+    final pairOffset = (userElement!.index * 5) + todayElement.index;
+    return variants[(seed + pairOffset) % variants.length];
+  }
+
+  List<_TodayDetailContent> _buildBalancedDetailVariants() {
+    return const <_TodayDetailContent>[
+      _TodayDetailContent(
+        headline: 'Today is best handled with steady, uncomplicated choices.',
+        focus:
+            'Nothing dramatic is required. Small routines and clean decisions will do more than pushing for a breakthrough.',
+        focusLabel: 'Stay steady',
+        ritualLabel: 'Keep simple',
+        ritual:
+            'Use familiar meals, a clear schedule, and a small evening reset to keep the day feeling balanced.',
+      ),
+      _TodayDetailContent(
+        headline: 'The day favors balance over intensity.',
+        focus:
+            'A composed rhythm will help more than chasing extra stimulation or reacting too quickly.',
+        focusLabel: 'Balance',
+        ritualLabel: 'Stay light',
+        ritual:
+            'Let the day breathe. Leave white space between tasks so your mood stays cleaner and more stable.',
+      ),
+      _TodayDetailContent(
+        headline: 'A softer pace will reveal more than forcing the day.',
+        focus:
+            'Use the day to notice patterns, keep your energy even, and avoid taking on more than feels natural.',
+        focusLabel: 'Notice rhythm',
+        ritualLabel: 'Reset softly',
+        ritual:
+            'Choose one calming anchor such as tea, stretching, or a quiet walk before the evening ends.',
+      ),
+      _TodayDetailContent(
+        headline: 'Simple structure will make today feel cleaner and calmer.',
+        focus:
+            'If you keep your attention on one thing at a time, the whole day will feel more supportive.',
+        focusLabel: 'One thing',
+        ritualLabel: 'Clear space',
+        ritual:
+            'Tidy one corner of your environment or your schedule so the rest of the day feels easier to hold.',
+      ),
+    ];
+  }
+
+  List<_TodayDetailContent> _buildPairDetailVariants({
+    required OhaengElement userElement,
+    required OhaengElement todayElement,
+    required String interaction,
+    required DateTime now,
+  }) {
+    final userVoice = _elementVoices[userElement]!;
+    final dayVoice = _elementVoices[todayElement]!;
+    final relationVoice =
+        _relationVoices[interaction] ?? _relationVoices['neutral']!;
+    final seasonVoice = _seasonVoiceFor(now);
+    final pairVoice = _pairVoices[_pairKey(userElement, todayElement)]!;
+
+    return <_TodayDetailContent>[
+      _TodayDetailContent(
+        headline:
+            '${pairVoice.headline} Your ${userVoice.title.toLowerCase()} energy meets a ${dayVoice.title.toLowerCase()} day with ${relationVoice.headlineTone}.',
+        focus:
+            '${relationVoice.focusIntro} Let ${userVoice.gift} shape how you move, while today keeps asking for ${dayVoice.dayTone}. ${seasonVoice.focusAddon}',
+        focusLabel: relationVoice.focusLabel,
+        ritualLabel: userVoice.ritualLabel,
+        ritual:
+            'Start with ${userVoice.ritual}, then give extra room for ${dayVoice.resetNeed} so the day stays coherent. ${pairVoice.ritualHint}',
+      ),
+      _TodayDetailContent(
+        headline:
+            '${userVoice.title} and ${dayVoice.title} create a ${relationVoice.patternName.toLowerCase()} rhythm today. ${pairVoice.headline}',
+        focus:
+            'This pairing favors ${relationVoice.focusAction} more than intensity. Stay close to ${userVoice.center} and avoid letting ${dayVoice.drag} set the whole mood. ${seasonVoice.moodLine}',
+        focusLabel: dayVoice.focusLabel,
+        ritualLabel: relationVoice.ritualLabel,
+        ritual:
+            'Use ${dayVoice.ritualSupport} as a reset point, then return to one clear task before your energy scatters. ${pairVoice.ritualHint}',
+      ),
+      _TodayDetailContent(
+        headline:
+            'There is a distinct ${relationVoice.energyWord.toLowerCase()} between your ${userVoice.title.toLowerCase()} nature and today\'s ${dayVoice.title.toLowerCase()} flow. ${pairVoice.headline}',
+        focus:
+            'You will feel better if you trust ${userVoice.strengthPhrase} while adjusting to ${dayVoice.surfaceMood}. Keep the day practical enough that your body can stay with it. ${pairVoice.focusHint}',
+        focusLabel: userVoice.focusLabel,
+        ritualLabel: dayVoice.ritualLabel,
+        ritual:
+            'A small ritual like ${userVoice.eveningRitual} will help you absorb the day without carrying too much of it forward. ${seasonVoice.ritualAddon}',
+      ),
+      _TodayDetailContent(
+        headline:
+            'Today carries ${dayVoice.weatherImage}, while your ${userVoice.title.toLowerCase()} energy prefers ${userVoice.preferredWeather}. ${pairVoice.headline}',
+        focus:
+            '${relationVoice.boundaryLine} Build the day around ${userVoice.groundingAction}, and let ${dayVoice.opportunity} arrive without chasing it too hard. ${seasonVoice.focusAddon}',
+        focusLabel: relationVoice.altFocusLabel,
+        ritualLabel: 'Daily rhythm',
+        ritual:
+            'Keep meals, movement, and rest slightly more intentional than usual. That is where this ${userVoice.title.toLowerCase()} and ${dayVoice.title.toLowerCase()} pairing becomes easier. ${pairVoice.ritualHint}',
+      ),
+    ];
+  }
+
+  int _weeklyCycleSeed(DateTime now) {
+    return now.difference(DateTime(2024, 1, 1)).inDays ~/ 7;
+  }
+
+  String _pairKey(OhaengElement userElement, OhaengElement todayElement) {
+    return '${formatElement(userElement).toLowerCase()}_${formatElement(todayElement).toLowerCase()}';
+  }
+
+  _SeasonVoice _seasonVoiceFor(DateTime now) {
+    switch (now.month) {
+      case 3:
+      case 4:
+      case 5:
+        return _seasonVoices['spring']!;
+      case 6:
+      case 7:
+      case 8:
+        return _seasonVoices['summer']!;
+      case 9:
+      case 10:
+      case 11:
+        return _seasonVoices['autumn']!;
+      default:
+        return _seasonVoices['winter']!;
     }
   }
 
@@ -2091,14 +3231,136 @@ class _GuideCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: backgroundColor,
-      elevation: 0,
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Icon(icon, color: const Color(0xFF789288)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(description),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE7D8BE)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5EAD7),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, color: const Color(0xFF789288)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: Color(0xFF2C2C2C),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: Color(0xFF5A5145),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.86),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFE0CFB2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFF7D664A)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF5A4B39),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HighlightPanel extends StatelessWidget {
+  const _HighlightPanel({
+    required this.title,
+    required this.value,
+    required this.accentColor,
+  });
+
+  final String title;
+  final String value;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accentColor.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+              color: accentColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2C2C2C),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2137,6 +3399,374 @@ class _ElementInsight {
   final String strengths;
   final String challenges;
   final String wellnessStrategy;
+}
+
+class _TodayDetailContent {
+  const _TodayDetailContent({
+    required this.headline,
+    required this.focus,
+    required this.focusLabel,
+    required this.ritualLabel,
+    required this.ritual,
+  });
+
+  final String headline;
+  final String focus;
+  final String focusLabel;
+  final String ritualLabel;
+  final String ritual;
+}
+
+class _ElementVoice {
+  const _ElementVoice({
+    required this.title,
+    required this.gift,
+    required this.dayTone,
+    required this.resetNeed,
+    required this.center,
+    required this.drag,
+    required this.ritual,
+    required this.ritualLabel,
+    required this.ritualSupport,
+    required this.focusLabel,
+    required this.strengthPhrase,
+    required this.eveningRitual,
+    required this.weatherImage,
+    required this.preferredWeather,
+    required this.groundingAction,
+    required this.opportunity,
+    required this.surfaceMood,
+  });
+
+  final String title;
+  final String gift;
+  final String dayTone;
+  final String resetNeed;
+  final String center;
+  final String drag;
+  final String ritual;
+  final String ritualLabel;
+  final String ritualSupport;
+  final String focusLabel;
+  final String strengthPhrase;
+  final String eveningRitual;
+  final String weatherImage;
+  final String preferredWeather;
+  final String groundingAction;
+  final String opportunity;
+  final String surfaceMood;
+}
+
+class _RelationVoice {
+  const _RelationVoice({
+    required this.headlineTone,
+    required this.focusIntro,
+    required this.focusLabel,
+    required this.altFocusLabel,
+    required this.ritualLabel,
+    required this.patternName,
+    required this.focusAction,
+    required this.energyWord,
+    required this.boundaryLine,
+  });
+
+  final String headlineTone;
+  final String focusIntro;
+  final String focusLabel;
+  final String altFocusLabel;
+  final String ritualLabel;
+  final String patternName;
+  final String focusAction;
+  final String energyWord;
+  final String boundaryLine;
+}
+
+class _PairVoice {
+  const _PairVoice({
+    required this.headline,
+    required this.focusHint,
+    required this.ritualHint,
+  });
+
+  final String headline;
+  final String focusHint;
+  final String ritualHint;
+}
+
+class _SeasonVoice {
+  const _SeasonVoice({
+    required this.focusAddon,
+    required this.moodLine,
+    required this.ritualAddon,
+  });
+
+  final String focusAddon;
+  final String moodLine;
+  final String ritualAddon;
+}
+
+const Map<OhaengElement, _ElementVoice> _elementVoices =
+    <OhaengElement, _ElementVoice>{
+      OhaengElement.wood: _ElementVoice(
+        title: 'Wood',
+        gift: 'clear initiative and fresh movement',
+        dayTone: 'forward motion and cleaner momentum',
+        resetNeed: 'space to breathe and redirect',
+        center: 'a sense of progress',
+        drag: 'impatience or scattered urgency',
+        ritual: 'one clear morning priority',
+        ritualLabel: 'Set intention',
+        ritualSupport: 'a brisk walk or a clean desk',
+        focusLabel: 'Initiative',
+        strengthPhrase: 'your instinct to begin',
+        eveningRitual: 'stretching or a short walk',
+        weatherImage: 'rising wind',
+        preferredWeather: 'steady growth',
+        groundingAction: 'beginning one useful thing early',
+        opportunity: 'new movement',
+        surfaceMood: 'movement and expansion',
+      ),
+      OhaengElement.fire: _ElementVoice(
+        title: 'Fire',
+        gift: 'warm expression and visible confidence',
+        dayTone: 'brightness, contact, and momentum',
+        resetNeed: 'cooling pauses and softer pacing',
+        center: 'a felt sense of connection',
+        drag: 'overheating, rushing, or reacting too fast',
+        ritual: 'a calm start before the day gets loud',
+        ritualLabel: 'Cool the pace',
+        ritualSupport: 'water, shade, or a slower lunch',
+        focusLabel: 'Expression',
+        strengthPhrase: 'your natural spark',
+        eveningRitual: 'dim lights and a quiet wind-down',
+        weatherImage: 'midday heat',
+        preferredWeather: 'steady warmth',
+        groundingAction: 'speaking clearly without oversharing',
+        opportunity: 'warm connection',
+        surfaceMood: 'heat and visibility',
+      ),
+      OhaengElement.earth: _ElementVoice(
+        title: 'Earth',
+        gift: 'grounding steadiness and patient care',
+        dayTone: 'stability, nourishment, and practical rhythm',
+        resetNeed: 'simple structure and real rest',
+        center: 'what feels dependable',
+        drag: 'heaviness, overthinking, or carrying too much',
+        ritual: 'a slower start with food or tea',
+        ritualLabel: 'Ground first',
+        ritualSupport: 'warm meals or a tidy routine',
+        focusLabel: 'Stability',
+        strengthPhrase: 'your ability to hold things calmly',
+        eveningRitual: 'a warm meal and an early pause',
+        weatherImage: 'late-summer stillness',
+        preferredWeather: 'predictable calm',
+        groundingAction: 'keeping the schedule realistic',
+        opportunity: 'steady progress',
+        surfaceMood: 'stability and density',
+      ),
+      OhaengElement.metal: _ElementVoice(
+        title: 'Metal',
+        gift: 'clarity, standards, and clean decisions',
+        dayTone: 'precision, order, and sharper judgment',
+        resetNeed: 'room, breath, and less pressure',
+        center: 'what feels clean and true',
+        drag: 'rigidity, self-criticism, or tension',
+        ritual: 'clearing one priority before distractions build',
+        ritualLabel: 'Refine focus',
+        ritualSupport: 'fresh air and a shorter to-do list',
+        focusLabel: 'Clarity',
+        strengthPhrase: 'your ability to refine what matters',
+        eveningRitual: 'fresh air and a digital pause',
+        weatherImage: 'crisp autumn air',
+        preferredWeather: 'clear skies',
+        groundingAction: 'editing down to essentials',
+        opportunity: 'cleaner decisions',
+        surfaceMood: 'clarity and sharpness',
+      ),
+      OhaengElement.water: _ElementVoice(
+        title: 'Water',
+        gift: 'intuition, depth, and reflective timing',
+        dayTone: 'quiet wisdom and emotional range',
+        resetNeed: 'warmth, stillness, and protected energy',
+        center: 'what feels inwardly true',
+        drag: 'withdrawal, fear, or low energy',
+        ritual: 'moving slowly enough to hear yourself think',
+        ritualLabel: 'Protect energy',
+        ritualSupport: 'warm drinks and quieter space',
+        focusLabel: 'Inner timing',
+        strengthPhrase: 'your ability to sense timing',
+        eveningRitual: 'a warm shower or quiet journaling',
+        weatherImage: 'deep water under a calm sky',
+        preferredWeather: 'warm shelter',
+        groundingAction: 'leaving margin in the day',
+        opportunity: 'quiet insight',
+        surfaceMood: 'depth and softness',
+      ),
+    };
+
+const Map<String, _RelationVoice> _relationVoices = <String, _RelationVoice>{
+  'boost': _RelationVoice(
+    headlineTone: 'natural support',
+    focusIntro:
+        'The day is largely working with you, so move with confidence without wasting the opening.',
+    focusLabel: 'Momentum',
+    altFocusLabel: 'Green light',
+    ritualLabel: 'Use the opening',
+    patternName: 'supportive pattern',
+    focusAction: 'clean movement',
+    energyWord: 'lift',
+    boundaryLine:
+        'You do not need to chase luck today; it responds better when you meet it halfway.',
+  ),
+  'support': _RelationVoice(
+    headlineTone: 'generous pull',
+    focusIntro:
+        'You may be feeding the day more than the day feeds you, so protect your pace on purpose.',
+    focusLabel: 'Protect pace',
+    altFocusLabel: 'Boundaries',
+    ritualLabel: 'Refill often',
+    patternName: 'supportive but draining pattern',
+    focusAction: 'measured contribution',
+    energyWord: 'output',
+    boundaryLine:
+        'Support what matters, but do not let the day consume your whole reserve.',
+  ),
+  'control': _RelationVoice(
+    headlineTone: 'controlled tension',
+    focusIntro:
+        'Your instinct may try to steer the day strongly, but better results will come from gentler pressure.',
+    focusLabel: 'Simplify',
+    altFocusLabel: 'Gentle control',
+    ritualLabel: 'Trim pressure',
+    patternName: 'directive pattern',
+    focusAction: 'restraint',
+    energyWord: 'tension',
+    boundaryLine:
+        'Keep your hands light on the day. Too much force will reduce the clarity you want.',
+  ),
+  'suppressed': _RelationVoice(
+    headlineTone: 'heavier weather',
+    focusIntro:
+        'The day may ask your system to soften and recover before it can fully respond.',
+    focusLabel: 'Recover',
+    altFocusLabel: 'Lower noise',
+    ritualLabel: 'Restore first',
+    patternName: 'pressured pattern',
+    focusAction: 'protection',
+    energyWord: 'drag',
+    boundaryLine:
+        'Lower the volume around your day and let steadiness matter more than output.',
+  ),
+  'neutral': _RelationVoice(
+    headlineTone: 'quiet balance',
+    focusIntro:
+        'Nothing extreme is required today, which makes small consistent choices unusually valuable.',
+    focusLabel: 'Stay steady',
+    altFocusLabel: 'Balance',
+    ritualLabel: 'Keep it simple',
+    patternName: 'balanced pattern',
+    focusAction: 'consistency',
+    energyWord: 'calm',
+    boundaryLine:
+        'A calmer rhythm is enough today. Let steadiness do more of the work.',
+  ),
+};
+
+final Map<String, _PairVoice> _pairVoices = <String, _PairVoice>{
+  for (final user in OhaengElement.values)
+    for (final today in OhaengElement.values)
+      '${formatElement(user).toLowerCase()}_${formatElement(today).toLowerCase()}':
+          _buildPairVoice(user, today),
+};
+
+const Map<String, _SeasonVoice> _seasonVoices = <String, _SeasonVoice>{
+  'spring': _SeasonVoice(
+    focusAddon:
+        'Spring energy makes beginnings feel more available than usual.',
+    moodLine: 'This season rewards clean starts and gentle forward motion.',
+    ritualAddon:
+        'A little fresh air or a walk outside will help the message of the day land better.',
+  ),
+  'summer': _SeasonVoice(
+    focusAddon:
+        'Summer can amplify emotion and momentum, so pacing matters more than usual.',
+    moodLine: 'Warm weather tends to magnify both enthusiasm and fatigue.',
+    ritualAddon:
+        'Hydration, shade, and shorter resets will do more for you right now than extra pressure.',
+  ),
+  'autumn': _SeasonVoice(
+    focusAddon:
+        'Autumn supports clearer decisions, trimming excess, and protecting your boundaries.',
+    moodLine: 'This season favors refinement over expansion.',
+    ritualAddon:
+        'A tidy space or slower evening transition will help the day settle into something useful.',
+  ),
+  'winter': _SeasonVoice(
+    focusAddon:
+        'Winter asks for conservation, warmth, and slightly more patience with your own energy.',
+    moodLine: 'This season tends to reward rest, depth, and quieter timing.',
+    ritualAddon:
+        'Warm meals, softer light, and a gentler ending will help your body absorb the day.',
+  ),
+};
+
+_PairVoice _buildPairVoice(OhaengElement user, OhaengElement today) {
+  final userLabel = formatElement(user);
+  final todayLabel = formatElement(today);
+  final relation = getInteraction(user, today);
+
+  final baseHeadline = switch (relation) {
+    'boost' => '$userLabel naturally receives today\'s $todayLabel tone.',
+    'support' => '$userLabel is feeding today\'s $todayLabel movement.',
+    'control' => '$userLabel may try to shape today\'s $todayLabel rhythm.',
+    'suppressed' => '$todayLabel can press down on your $userLabel rhythm.',
+    _ => '$userLabel and $todayLabel are moving in a quieter balance.',
+  };
+
+  final baseFocus = switch ((user, today)) {
+    (OhaengElement.wood, OhaengElement.fire) =>
+      'This pair favors initiative, visibility, and starting while the energy is warm.',
+    (OhaengElement.fire, OhaengElement.water) =>
+      'This pair can swing between heat and retreat, so emotional pacing matters.',
+    (OhaengElement.earth, OhaengElement.earth) =>
+      'This pair is strongest when your day stays simple, grounded, and practical.',
+    (OhaengElement.metal, OhaengElement.wood) =>
+      'This pair can feel sharp, so precision should stay softer than usual.',
+    (OhaengElement.water, OhaengElement.metal) =>
+      'This pair supports depth, reflection, and cleaner inner listening.',
+    (OhaengElement.wood, OhaengElement.water) =>
+      'This pair favors gentle recovery and a slower build into the day.',
+    (OhaengElement.fire, OhaengElement.earth) =>
+      'This pair can turn enthusiasm into real progress if you keep it structured.',
+    (OhaengElement.earth, OhaengElement.metal) =>
+      'This pair rewards consistency, refinement, and less emotional clutter.',
+    (OhaengElement.metal, OhaengElement.water) =>
+      'This pair often brings clearer thought and more intuitive timing together.',
+    (OhaengElement.water, OhaengElement.wood) =>
+      'This pair is good for beginnings that need patience more than force.',
+    _ =>
+      'This pair changes the texture of the day enough that small adjustments will be noticed.',
+  };
+
+  final baseRitual = switch ((user, today)) {
+    (OhaengElement.wood, OhaengElement.fire) =>
+      'Begin early, then protect your energy before momentum turns noisy.',
+    (OhaengElement.fire, OhaengElement.water) =>
+      'Alternate expression with cooling pauses so the day does not overheat.',
+    (OhaengElement.earth, OhaengElement.earth) =>
+      'Eat, organize, and move at a pace your body can actually keep.',
+    (OhaengElement.metal, OhaengElement.wood) =>
+      'Leave more space than you think you need before making the next decision.',
+    (OhaengElement.water, OhaengElement.metal) =>
+      'Choose one quiet ritual that helps insight become action.',
+    _ => 'Keep one simple ritual close so the day keeps a stable center.',
+  };
+
+  return _PairVoice(
+    headline: baseHeadline,
+    focusHint: baseFocus,
+    ritualHint: baseRitual,
+  );
 }
 
 class _InsightDetail extends StatelessWidget {
@@ -2266,7 +3896,7 @@ class _AssistantMascotState extends State<_AssistantMascot>
                 padding: EdgeInsets.all(widget.compact ? 10 : 16),
                 child: ClipOval(
                   child: Image.asset(
-                    'assets/assistant_cat.png',
+                    'assets/branding/hanbit-app-icon-moonjar-v2.png',
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return _AssistantMascotFallback(compact: widget.compact);

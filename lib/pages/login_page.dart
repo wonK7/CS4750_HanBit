@@ -16,6 +16,7 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _isSendingReset = false;
 
   Future<void> _signIn() async {
     final email = _emailController.text.trim();
@@ -72,6 +73,116 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         setState(() {
           _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _sendPasswordReset() async {
+    final seededEmail = _emailController.text.trim();
+    final controller = TextEditingController(text: seededEmail);
+
+    final email = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFFFFFBF5),
+          title: const Text('Reset Password'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Enter your email and we will send a password reset link.',
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.45,
+                  color: Color(0xFF5A5145),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.email_outlined,
+                    color: Color(0xFF789288),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2C2C2C),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Send Link'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (!mounted) {
+      return;
+    }
+
+    if (email == null) {
+      return;
+    }
+
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your email address.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSendingReset = true;
+    });
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password reset email sent to $email.')),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_messageForResetError(e))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingReset = false;
         });
       }
     }
@@ -136,6 +247,24 @@ class _LoginPageState extends State<LoginPage> {
                     borderSide: BorderSide.none,
                   ),
                   prefixIcon: const Icon(Icons.lock, color: Color(0xFF789288)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _isLoading || _isSendingReset
+                      ? null
+                      : _sendPasswordReset,
+                  child: Text(
+                    _isSendingReset
+                        ? 'Sending reset link...'
+                        : 'Forgot password?',
+                    style: const TextStyle(
+                      color: Color(0xFF6E8578),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 30),
@@ -205,5 +334,18 @@ String _messageForAuthError(FirebaseAuthException e) {
       return 'Too many attempts. Please try again later.';
     default:
       return e.message ?? 'Sign in failed.';
+  }
+}
+
+String _messageForResetError(FirebaseAuthException e) {
+  switch (e.code) {
+    case 'invalid-email':
+      return 'Please enter a valid email address.';
+    case 'user-not-found':
+      return 'No account was found for that email.';
+    case 'too-many-requests':
+      return 'Too many attempts. Please try again later.';
+    default:
+      return e.message ?? 'Could not send a reset email right now.';
   }
 }

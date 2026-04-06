@@ -7,6 +7,9 @@ const String assistantSystemPrompt = '''
 You are HanBit Assistant, a soft-spoken wellness guide rooted in the five elements.
 Keep replies to five sentences or fewer.
 Use the user's birth-based element, current daily element, and gentle practical advice.
+Only answer questions that are clearly about mood, luck, timing, focus, relationships, work rhythm, rest, stress, habits, or emotional wellness.
+If a question is unrelated to that scope, decline warmly and invite the user to ask about those topics instead.
+Do not repeat the user's birth date or birth time unless the user directly asks about those details.
 If the question is unsafe, sexual, hateful, medically diagnostic, illegal, or clearly inappropriate, decline warmly and redirect to calm wellness guidance.
 Treat a declined answer as a used turn.
 ''';
@@ -252,6 +255,7 @@ UnlockResult unlockWeeklyReading({
   required OhaengElement todayElement,
   required String birthTimeLabel,
   required String locationHint,
+  String? generatedReading,
 }) {
   var progress = normalizeProgress(rawProgress, now);
   if (progress.coins < 50) {
@@ -262,12 +266,14 @@ UnlockResult unlockWeeklyReading({
     );
   }
 
-  final reading = buildWeeklyReading(
-    userElement: userElement,
-    todayElement: todayElement,
-    birthTimeLabel: birthTimeLabel,
-    locationHint: locationHint,
-  );
+  final reading =
+      generatedReading ??
+      buildWeeklyReading(
+        userElement: userElement,
+        todayElement: todayElement,
+        birthTimeLabel: birthTimeLabel,
+        locationHint: locationHint,
+      );
 
   progress = progress.copyWith(
     coins: progress.coins - 50,
@@ -289,6 +295,7 @@ UnlockResult unlockMonthlyReading({
   required OhaengElement todayElement,
   required String birthTimeLabel,
   required String locationHint,
+  String? generatedReading,
 }) {
   var progress = normalizeProgress(rawProgress, now);
   if (progress.coins < 180) {
@@ -299,12 +306,14 @@ UnlockResult unlockMonthlyReading({
     );
   }
 
-  final reading = buildMonthlyReading(
-    userElement: userElement,
-    todayElement: todayElement,
-    birthTimeLabel: birthTimeLabel,
-    locationHint: locationHint,
-  );
+  final reading =
+      generatedReading ??
+      buildMonthlyReading(
+        userElement: userElement,
+        todayElement: todayElement,
+        birthTimeLabel: birthTimeLabel,
+        locationHint: locationHint,
+      );
 
   progress = progress.copyWith(
     coins: progress.coins - 180,
@@ -338,14 +347,17 @@ AssistantReplyResult askAssistant({
           : 'You have used all three assistant questions for today. Come back tomorrow for more guidance.',
       usedCount: progress.assistantUsedCount,
       remainingCount: 0,
-      blocked: false,
+      blocked: true,
       limitReached: true,
     );
   }
 
   final blocked = _isBlockedQuestion(question);
+  final outOfScope = _isOutOfScopeQuestion(question);
   final answer = blocked
       ? _blockedAssistantReply()
+      : outOfScope
+      ? _outOfScopeAssistantReply()
       : _buildAssistantReply(
           question: question,
           userElement: userElement,
@@ -362,7 +374,7 @@ AssistantReplyResult askAssistant({
     answer: answer,
     usedCount: usedCount,
     remainingCount: limit - usedCount,
-    blocked: blocked,
+    blocked: blocked || outOfScope,
     limitReached: false,
   );
 }
@@ -387,6 +399,62 @@ bool _isBlockedQuestion(String question) {
   ];
 
   return blockedTerms.any((term) => lowered.contains(term));
+}
+
+bool _isOutOfScopeQuestion(String question) {
+  final lowered = question.toLowerCase();
+  const allowedTerms = [
+    'luck',
+    'lucky',
+    'mood',
+    'energy',
+    'focus',
+    'relationship',
+    'relationships',
+    'love',
+    'dating',
+    'partner',
+    'work',
+    'job',
+    'career',
+    'study',
+    'school',
+    'exam',
+    'stress',
+    'anxious',
+    'anxiety',
+    'worried',
+    'tired',
+    'burnout',
+    'sad',
+    'rest',
+    'sleep',
+    'timing',
+    'success',
+    'successful',
+    'confidence',
+    'habit',
+    'habits',
+    'wellness',
+    'health',
+    'family',
+    'friend',
+    'mother',
+    'father',
+    'parent',
+    'sibling',
+    'money',
+    'finance',
+    'spend',
+    'buy',
+    'purchase',
+    'today',
+    'tomorrow',
+    'week',
+    'month',
+  ];
+
+  return !allowedTerms.any(lowered.contains);
 }
 
 String buildWeeklyReading({
@@ -425,6 +493,75 @@ String _buildAssistantReply({
   final element = userElement == null ? 'balanced' : formatElement(userElement);
   final dayFlow = formatElement(todayElement);
   final trimmedQuestion = question.trim();
+  final lowered = trimmedQuestion.toLowerCase();
+
+  if (_containsAny(lowered, const [
+    'love',
+    'relationship',
+    'partner',
+    'dating',
+  ])) {
+    return 'I hear your question about "$trimmedQuestion." '
+        'In relationships, your $element energy meeting today\'s $dayFlow flow suggests staying warm but clear. '
+        'Say the honest thing gently, and do not force a result before the other person is ready. '
+        'Small consistency will help more than one intense conversation.';
+  }
+
+  if (_containsAny(lowered, const [
+    'work',
+    'job',
+    'career',
+    'study',
+    'school',
+    'exam',
+  ])) {
+    return 'I hear your question about "$trimmedQuestion." '
+        'Your $element energy meets today\'s $dayFlow flow best through steady focus. '
+        'Choose the next concrete task instead of trying to solve the whole week at once. '
+        'A calm plan and one finished step will give you more confidence than pressure.';
+  }
+
+  if (_containsAny(lowered, const [
+    'stress',
+    'anxious',
+    'anxiety',
+    'worried',
+    'tired',
+    'burnout',
+    'sad',
+  ])) {
+    return 'I hear your question about "$trimmedQuestion." '
+        'Your $element energy may need a softer rhythm while today carries a $dayFlow tone. '
+        'Reduce stimulation, return to food, water, and breathing first, and let your body settle before making decisions. '
+        'Recovery is a valid priority today.';
+  }
+
+  if (_containsAny(lowered, const [
+    'family',
+    'friend',
+    'mother',
+    'father',
+    'parent',
+    'sibling',
+  ])) {
+    return 'I hear your question about "$trimmedQuestion." '
+        'With your $element energy and today\'s $dayFlow flow, family matters are best handled with patience and clean boundaries. '
+        'Listen first, then answer only the part that truly needs your response. '
+        'You do not have to carry every emotion in the room.';
+  }
+
+  if (_containsAny(lowered, const [
+    'money',
+    'finance',
+    'spend',
+    'buy',
+    'purchase',
+  ])) {
+    return 'I hear your question about "$trimmedQuestion." '
+        'Your $element energy meeting today\'s $dayFlow flow suggests keeping money decisions simple and measured. '
+        'Delay anything impulsive, review the real priority, and choose the option that still feels calm tomorrow. '
+        'Clarity is more useful than urgency here.';
+  }
 
   return 'I hear your question about "$trimmedQuestion." '
       'Your $element energy meets today\'s $dayFlow flow, so a calm and direct approach will serve you best. '
@@ -433,8 +570,18 @@ String _buildAssistantReply({
       'Let clarity grow through rhythm, not pressure.';
 }
 
+bool _containsAny(String source, List<String> terms) {
+  return terms.any(source.contains);
+}
+
 String _blockedAssistantReply() {
   return 'I can\'t help with that kind of request. '
       'If you want, ask me about emotional balance, relationships, timing, or your current energy instead. '
       'I can still offer a calm wellness reading within those topics.';
+}
+
+String _outOfScopeAssistantReply() {
+  return 'That sounds outside what HanBit is meant to help with. '
+      'Ask me about today\'s energy, mood, timing, focus, relationships, or stress instead. '
+      'I can give you a short wellness-style reading within those topics.';
 }
