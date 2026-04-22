@@ -43,8 +43,8 @@ const defaultRecommendation = {
       'Today leans steady overall, so simple consistent choices will work best.',
   'k': ['Warm barley tea', 'Soft fruit', 'Simple soup'],
   'global': [
-    'Wellness focus: keep hydration steady and avoid stacking too many demands.',
-    'If energy feels low, a simple multivitamin or magnesium routine may help you stay even.',
+    'Wellness focus: stay hydrated and avoid overloading your schedule.',
+    'If your energy feels low, a simple multivitamin or magnesium routine may help you feel steadier.',
   ],
   'supplement': ['Multivitamin'],
   'avoid': ['Stress', 'Skipping meals'],
@@ -67,40 +67,40 @@ const Map<String, String> _stateLeadLines = {
 
 const Map<String, List<String>> _supportFocusLibrary = {
   'restore': [
-    'Wellness focus: lower friction, hydrate early, and eat on time.',
-    'Supplement angle: magnesium, vitamin D, or iron-rich support can fit low-energy days.',
-    'Choose steadier fuel over convenience if your body feels run down.',
+    'Wellness focus: make the day easier on yourself, hydrate early, and eat on time.',
+    'Supplement angle: magnesium, vitamin D, or iron-supportive nutrients may suit lower-energy days.',
+    'Choose steady, nourishing food over convenience if your body feels run down.',
     'Protect recovery first instead of trying to win the day with willpower alone.',
   ],
   'focus': [
-    'Wellness focus: keep caffeine cleaner, add water, and reduce distractions around meals.',
-    'Supplement angle: B-complex, omega-3, or magnesium can suit focus-heavy days.',
-    'A protein-forward meal and a short walk may help your attention hold longer.',
+    'Wellness focus: keep caffeine moderate, drink more water, and make meals less rushed.',
+    'Supplement angle: B-complex, omega-3, or magnesium may suit focus-heavy days.',
+    'A protein-rich meal and a short walk may help you stay focused longer.',
     'Build clarity with routine instead of waiting for motivation to appear.',
   ],
   'lift': [
-    'Wellness focus: stabilize blood sugar and avoid long gaps between meals.',
-    'Supplement angle: magnesium or B6 may fit days with tension or emotional swings.',
-    'Favor calm, grounding habits over sugary or overly stimulating fixes.',
-    'Keep your inputs gentler if your mood feels easy to throw off today.',
+    'Wellness focus: keep your energy steady and avoid long gaps between meals.',
+    'Supplement angle: magnesium or B6 may suit days with tension or mood swings.',
+    'Choose calm, grounding habits over sugary or overly stimulating fixes.',
+    'Be a little gentler with yourself if your mood feels easy to knock off balance today.',
   ],
   'steady': [
-    'Wellness focus: keep good habits boring and repeatable.',
-    'Supplement angle: a simple multivitamin, probiotics, or omega-3 can support maintenance days.',
+    'Wellness focus: keep your best habits simple and easy to repeat.',
+    'Supplement angle: a simple multivitamin, probiotics, or omega-3 can work well on maintenance days.',
     'Nothing extreme is needed today if you stay consistent with basics.',
     'Use the calmer rhythm to reinforce one habit that is already working.',
   ],
   'spark': [
     'Wellness focus: use your energy early, then keep your pace organized.',
-    'Supplement angle: B-complex, CoQ10, or electrolytes may fit active high-output days.',
+    'Supplement angle: B-complex, CoQ10, or electrolytes may suit active, high-output days.',
     'This is a better day for channeling energy than for suppressing it.',
-    'Pair momentum with hydration so good energy does not turn into burnout.',
+    'Pair momentum with hydration so a good day does not turn into burnout.',
   ],
   'cool': [
-    'Wellness focus: reduce overstimulation, cool your system, and keep your choices clean.',
-    'Supplement angle: magnesium, omega-3, or electrolytes may fit tense or overheated days.',
+    'Wellness focus: reduce overstimulation, cool things down, and keep your choices simple.',
+    'Supplement angle: magnesium, omega-3, or electrolytes may suit tense or overheated days.',
     'Cooling foods and calmer rhythms will likely work better than pushing harder.',
-    'Create less noise around yourself if everything already feels intense.',
+    'Reduce the noise around you if everything already feels intense.',
   ],
 };
 
@@ -153,7 +153,7 @@ const Map<OhaengElement, List<String>> _elementFoodLibrary = {
     'Warm breakfasts',
     'Soft savory bowls',
     'Sesame-based foods',
-    'Steady hydration with meals',
+    'A steady amount of water with meals',
   ],
 };
 
@@ -162,10 +162,10 @@ const Map<String, List<String>> _stateFoodLibrary = {
     'A warm meal that feels easy to digest',
     'Protein with complex carbs',
     'Soup, porridge, or broth-based food',
-    'Iron-aware foods if you feel depleted',
-    'Magnesium-supportive foods like seeds or leafy greens',
+    'Iron-supportive foods if you feel depleted',
+    'Magnesium-rich foods like seeds or leafy greens',
     'Regular meals instead of grazing randomly',
-    'Gentle hydration with a little salt or minerals',
+    'Steady hydration with a little salt or minerals',
     'A calmer breakfast instead of only caffeine',
   ],
   'focus': [
@@ -179,14 +179,14 @@ const Map<String, List<String>> _stateFoodLibrary = {
     'A lighter dinner if your brain already feels crowded',
   ],
   'lift': [
-    'Steady blood-sugar meals',
-    'Mood-stable snacks with protein and fiber',
-    'Magnesium-aware foods',
+    'Meals that help keep your energy steady',
+    'Snacks with protein and fiber to help you feel more balanced',
+    'Foods rich in magnesium',
     'Less sugary comfort food than usual',
     'Grounding warm drinks',
     'Something savory before reaching for sweets',
     'Calming carbs paired with protein',
-    'Regular hydration if emotions feel sharp',
+    'Regular hydration if you feel emotionally unsettled',
   ],
   'steady': [
     'A balanced simple meal',
@@ -201,7 +201,7 @@ const Map<String, List<String>> _stateFoodLibrary = {
   'spark': [
     'Fuel that matches a busier day',
     'Protein and carbs together before a demanding block',
-    'Electrolyte-aware hydration',
+    'Hydration with a little electrolyte support',
     'A substantial breakfast if your output is high',
     'Food that supports movement rather than crashes',
     'Light but energizing meals',
@@ -226,7 +226,7 @@ const Map<String, List<String>> _stateAvoidLibrary = {
     'Using caffeine as a substitute for food',
     'Late-night catch-up work',
     'Overbooking yourself',
-    'Ignoring low energy signals',
+    'Ignoring signs that you need rest',
     'Pushing through exhaustion',
   ],
   'focus': [
@@ -239,9 +239,9 @@ const Map<String, List<String>> _stateAvoidLibrary = {
   ],
   'lift': [
     'Sugar spikes followed by crashes',
-    'Emotion-driven impulse decisions',
+    'Impulsive decisions driven by emotion',
     'Doomscrolling when already tense',
-    'Skipping water when your mood dips',
+    'Forgetting to drink water when you feel low',
     'All-or-nothing thinking',
     'Picking fights from fatigue',
   ],
@@ -257,7 +257,7 @@ const Map<String, List<String>> _stateAvoidLibrary = {
     'Burning all your energy too early',
     'Too much caffeine on top of momentum',
     'Starting everything at once',
-    'Impulse spending or impulse messaging',
+    'Impulse spending or sending messages too quickly',
     'Skipping recovery because you feel good',
     'Turning urgency into pressure',
   ],
@@ -298,7 +298,7 @@ const Map<String, List<String>> _traitFoodLibrary = {
   ],
   'Independent': [
     'Easy self-directed meals you can assemble quickly',
-    'Food prep that reduces reliance on impulse',
+    'Meal prep that makes it easier not to eat on impulse',
   ],
   'Social': [
     'Balanced snacks before social plans',
@@ -318,7 +318,7 @@ const Map<String, List<String>> _traitSupportLibrary = {
   'Analytical': [
     'Do one clean thing at a time instead of optimizing everything.',
   ],
-  'Sensitive': ['Protect your nervous system from extra noise today.'],
+  'Sensitive': ['Protect your nervous system from too much noise and stimulation today.'],
   'Calm': ['Keep the pace you trust instead of matching other people.'],
   'Curious': ['Let novelty be small and intentional rather than scattered.'],
   'Driven': ['Use structure to protect yourself from overextending.'],
@@ -347,16 +347,16 @@ const Map<String, List<String>> _stressSupportLibrary = {
     'Support your body first so pressure does not decide the tone of the day.',
   ],
   'Emotional overwhelm': [
-    'Keep your meals and routines simpler than usual to lower internal noise.',
+    'Keep your meals and routines simpler than usual to calm things down internally.',
   ],
   'Too much pressure': [
-    'Use steadier fuel and hydration so stress does not become a physical crash.',
+    'Choose steadier meals and hydration so stress does not turn into a physical crash.',
   ],
   'Putting things off': [
     'Start with a low-friction task and a stabilizing meal rather than waiting to feel ready.',
   ],
   'Overthinking': [
-    'Favor body-based grounding over more mental looping today.',
+    'Choose grounding habits over getting stuck in your head today.',
   ],
 };
 
@@ -380,7 +380,7 @@ const Map<String, List<String>> _stressAvoidLibrary = {
     'Using stress as motivation',
   ],
   'Putting things off': [
-    'Avoidance disguised as preparation',
+    'Endless preparation that keeps you from actually starting',
     'Waiting for the perfect mood',
   ],
   'Overthinking': [
@@ -403,7 +403,7 @@ const Map<int, List<String>> _weekdayFoodLibrary = {
   DateTime.wednesday: [
     'A grounding meal that resets the middle of the week',
     'Comforting food that still leaves you mentally light',
-    'A steadier snack before the afternoon drag arrives',
+    'A steadier snack before the afternoon slump hits',
   ],
   DateTime.thursday: [
     'Food that protects energy before the week gets noisy',
@@ -422,7 +422,7 @@ const Map<int, List<String>> _weekdayFoodLibrary = {
   ],
   DateTime.sunday: [
     'A calming meal that helps you reset the week ahead',
-    'Gentle hydration and simple food before Monday arrives',
+    'A little extra water and simple food before Monday arrives',
     'A Sunday meal that feels settling rather than excessive',
   ],
 };
@@ -557,14 +557,14 @@ const Map<String, List<String>> _traitAvoidLibrary = {
   ],
   'Sensitive': [
     'Letting overstimulation pile up quietly',
-    'Forcing yourself to tolerate more noise than you need to',
+    'Forcing yourself to put up with more noise than you need to',
   ],
   'Calm': [
     'Absorbing other people\'s urgency by default',
     'Staying agreeable when your body wants limits',
   ],
   'Curious': [
-    'Too much novelty when steadiness would help more',
+    'Too much novelty when a little steadiness would help more',
     'Switching tracks before one thing settles',
   ],
   'Driven': [

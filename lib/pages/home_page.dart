@@ -2586,13 +2586,13 @@ class _HomePageState extends State<HomePage> {
         'Put your clearest task first and reduce decision noise.',
         'Attention will hold better if you simplify inputs early.',
         'One deliberate priority will serve you better than five loose ones.',
-        'Your mind wants clean structure more than extra stimulation.',
+        'Your mind will do better with structure than with more stimulation.',
       ],
       'lift' => <String>[
         'Stability matters more than intensity if your mood shifts quickly.',
         'Choose grounding before reaching for stimulation.',
-        'Keep food, pace, and expectations steadier than usual.',
-        'A little emotional margin will help more than pushing through.',
+        'Keep your meals, pace, and expectations steadier than usual.',
+        'Give yourself a little emotional margin instead of pushing through.',
       ],
       'spark' => <String>[
         'Use the stronger energy early before it scatters.',
@@ -2603,7 +2603,7 @@ class _HomePageState extends State<HomePage> {
       'cool' => <String>[
         'Reduce heat, noise, and unnecessary stimulation where you can.',
         'Calmer choices will carry farther than aggressive ones today.',
-        'Do less to cool the system before it gets louder.',
+        'Do less and let your system settle before things get louder.',
         'Protect your attention from intensity creep.',
       ],
       _ => <String>[
@@ -2620,7 +2620,7 @@ class _HomePageState extends State<HomePage> {
             'Analytical' =>
               'Let clarity beat over-analysis once the next step is obvious.',
             'Sensitive' =>
-              'Protect your nervous system from extra noise and intensity.',
+              'Protect your nervous system from too much noise and intensity.',
             'Calm' => 'Keep your own pace even if the day around you gets louder.',
             'Curious' =>
               'Keep novelty small so your attention does not split too far.',
@@ -2653,7 +2653,7 @@ class _HomePageState extends State<HomePage> {
             'Emotional overwhelm' =>
               'Keep the day simpler than your feelings want to make it.',
             'Too much pressure' =>
-              'Treat steadiness as productive, not as a lesser option.',
+              'Treat steadiness as productive, not as settling for less.',
             'Putting things off' =>
               'Start with the easiest meaningful action before the day gets heavier.',
             'Overthinking' =>
