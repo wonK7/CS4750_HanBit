@@ -18,18 +18,18 @@ class RecoPage extends StatelessWidget {
         children: [
           _buildRecoItem(
             Icons.restaurant,
-            'K-Food',
-            'Warm Citron Tea (Yuja-cha) to balance your energy.',
+            'Food',
+            'Warm citron tea, soup, or fruit can help you settle into the day.',
           ),
           _buildRecoItem(
             Icons.self_improvement,
-            'K-Spirit',
-            "10 minutes of 'Seon' meditation for a clear mind.",
+            'Daily Support',
+            'A short walk, hydration, or ten calm minutes can reset your focus.',
           ),
           _buildRecoItem(
             Icons.spa,
-            'K-Beauty',
-            'Ginseng-based essence for skin vitality.',
+            'Body Care',
+            'Keep your routine simple and choose something that feels restorative.',
           ),
           const SizedBox(height: 40),
           ElevatedButton(
@@ -54,10 +54,7 @@ class RecoPage extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 15),
       child: ListTile(
         leading: Icon(icon, color: const Color(0xFF789288)),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(desc),
       ),
     );

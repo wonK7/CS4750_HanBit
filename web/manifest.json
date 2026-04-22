@@ -1,11 +1,11 @@
 {
-    "name": "HanBit",
+    "name": "HanBit Wellness",
     "short_name": "HanBit",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F6EFE4",
+    "theme_color": "#F0E1C5",
+    "description": "Korean-inspired wellness guidance with daily, weekly, and monthly five-element readings.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -73,4 +73,26 @@ class AssistantService {
 
     throw Exception('Premium reading response was empty.');
   }
+
+  Future<String> createShareLink({
+    required String shareType,
+    required String title,
+    required String description,
+    required String body,
+  }) async {
+    final callable = _functions.httpsCallable('createShareLink');
+    final result = await callable.call({
+      'shareType': shareType,
+      'title': title,
+      'description': description,
+      'body': body,
+    });
+
+    final data = result.data;
+    if (data is Map && data['url'] is String) {
+      return data['url'] as String;
+    }
+
+    throw Exception('Share link response was empty.');
+  }
 }

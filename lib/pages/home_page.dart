@@ -1,22 +1,18 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../support/update_notice_service.dart';
 import '../support/element_logic.dart';
 import '../support/engagement_logic.dart';
 import '../support/assistant_service.dart';
-import '../support/profile_options.dart';
 import 'login_page.dart';
 import 'signup_page.dart';
 
@@ -34,30 +30,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  static const List<String> _weekdayNames = <String>[
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-    'Saturday',
-    'Sunday',
-  ];
-  static const List<String> _monthNames = <String>[
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
-
   final TextEditingController _assistantController = TextEditingController();
   final List<_AssistantMessage> _assistantMessages = [];
   final GlobalKey _todayShareKey = GlobalKey();
@@ -82,14 +54,12 @@ class _HomePageState extends State<HomePage> {
   bool _loadingProfile = false;
   bool _syncingProgress = false;
   bool _assistantIsThinking = false;
-  bool _unlockingWeeklyReading = false;
-  bool _unlockingMonthlyReading = false;
   bool _coinBurstVisible = false;
   int _coinBurstReward = 0;
   AppProgress _progress = AppProgress.empty(DateTime.now());
   OhaengElement _selectedGuideElement = OhaengElement.wood;
-  List<String> _personalityTraits = <String>[];
-  List<String> _stressTriggers = <String>[];
+  List<String> _personalityTraits = const <String>[];
+  List<String> _stressTriggers = const <String>[];
   UpdateStatus? _updateStatus;
   bool _loadingUpdateStatus = false;
   bool _homeUpdateBannerDismissed = false;
@@ -103,6 +73,9 @@ class _HomePageState extends State<HomePage> {
 
   bool get _isGuestUser => FirebaseAuth.instance.currentUser == null;
   int get _assistantLimit => _isGuestUser ? 1 : 3;
+  int get _assistantRemaining =>
+      (_assistantLimit - _progress.assistantUsedCount).clamp(0, _assistantLimit)
+          as int;
   int get _assistantUsedCount => _progress.assistantUsedCount;
   bool get _showHomeUpdateBanner =>
       (_updateStatus?.hasUpdate ?? false) && !_homeUpdateBannerDismissed;
@@ -144,19 +117,12 @@ class _HomePageState extends State<HomePage> {
           final firstName = (remoteData['firstName'] as String?)?.trim();
           final savedBirthDate = remoteData['birthDate'] as Timestamp?;
           final savedBirthTime = remoteData['birthTime'] as String?;
-          final personalityTraits = _stringListFromDynamic(
-            remoteData['personalityTraits'],
-          );
-          final stressTriggers = _stringListFromDynamic(
-            remoteData['stressTriggers'],
-          );
 
           if (firstName != null && firstName.isNotEmpty) {
             displayFirstName = firstName;
           }
-
-          _personalityTraits = personalityTraits;
-          _stressTriggers = stressTriggers;
+          _personalityTraits = _readStringList(remoteData['personalityTraits']);
+          _stressTriggers = _readStringList(remoteData['stressTriggers']);
 
           if (savedBirthDate != null &&
               savedBirthTime != null &&
@@ -360,7 +326,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     setState(() {
-      _progress = nextProgress;
+      _progress = _normalizeStoredReadings(nextProgress);
     });
   }
 
@@ -407,12 +373,36 @@ class _HomePageState extends State<HomePage> {
     return zone;
   }
 
+  List<String> _readStringList(Object? value) {
+    if (value is! List) {
+      return const <String>[];
+    }
+    return value
+        .whereType<String>()
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<Map<String, String>> get _conversationHistory {
+    return _assistantMessages
+        .map(
+          (message) => <String, String>{
+            'role': message.isUser ? 'user' : 'assistant',
+            'content': message.content,
+          },
+        )
+        .toList(growable: false);
+  }
+
   void _applyReading({required DateTime picked, required String birthTime}) {
     final nextUserElement = getUserElementFromBirthdate(picked);
     final nextTodayElement = getTodayElement();
     final nextRecommendation = getRecommendation(
       nextUserElement,
       nextTodayElement,
+      personalityTraits: _personalityTraits,
+      stressTriggers: _stressTriggers,
     );
     final theme = elementTheme(nextUserElement);
 
@@ -460,6 +450,8 @@ class _HomePageState extends State<HomePage> {
     final nextRecommendation = getRecommendation(
       nextUserElement,
       nextTodayElement,
+      personalityTraits: _personalityTraits,
+      stressTriggers: _stressTriggers,
     );
 
     _applyReading(picked: picked, birthTime: nextBirthTimeLabel);
@@ -468,27 +460,27 @@ class _HomePageState extends State<HomePage> {
       final currentUser = FirebaseAuth.instance.currentUser;
       final isGuest = currentUser == null;
 
-      await FirebaseFirestore.instance.collection('readings').add({
-        'firstName': displayFirstName,
-        'userId': currentUser?.uid,
-        'isGuest': isGuest,
-        'birthDate': Timestamp.fromDate(picked),
-        'birthTime': nextBirthTimeLabel,
-        'userElement': formatElement(nextUserElement),
-        'todayElement': formatElement(nextTodayElement),
-        'interaction': nextRecommendation['interaction'],
-        'explanation': nextRecommendation['explanation'],
-        'k': nextRecommendation['k'],
-        'global': nextRecommendation['global'],
-        'supplement': nextRecommendation['supplement'],
-        'avoid': nextRecommendation['avoid'],
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
       if (!isGuest) {
+        await FirebaseFirestore.instance.collection('readings').add({
+          'firstName': displayFirstName,
+          'userId': currentUser.uid,
+          'isGuest': false,
+          'birthDate': Timestamp.fromDate(picked),
+          'birthTime': nextBirthTimeLabel,
+          'userElement': formatElement(nextUserElement),
+          'todayElement': formatElement(nextTodayElement),
+          'interaction': nextRecommendation['interaction'],
+          'explanation': nextRecommendation['explanation'],
+          'k': nextRecommendation['k'],
+          'global': nextRecommendation['global'],
+          'supplement': nextRecommendation['supplement'],
+          'avoid': nextRecommendation['avoid'],
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
         await FirebaseFirestore.instance
             .collection('users')
-            .doc(currentUser!.uid)
+            .doc(currentUser.uid)
             .set({
               'firstName': displayFirstName,
               'birthDate': Timestamp.fromDate(picked),
@@ -504,7 +496,13 @@ class _HomePageState extends State<HomePage> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Your energy profile was saved.')),
+        SnackBar(
+          content: Text(
+            isGuest
+                ? 'Your reading is ready. Sign in to save it across devices.'
+                : 'Your energy profile was saved.',
+          ),
+        ),
       );
     } catch (_) {
       if (!mounted) {
@@ -578,10 +576,6 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() {
-      _unlockingWeeklyReading = true;
-    });
-
     String? generatedReading;
     try {
       generatedReading = await _assistantService.generatePremiumReading(
@@ -592,7 +586,7 @@ class _HomePageState extends State<HomePage> {
         userElement: userElement == null ? '' : formatElement(userElement!),
         todayElement: formatElement(todayElement),
         timezoneLabel: _locationHint,
-        currentDateLabel: _formattedTodayLine(),
+        currentDateLabel: DateTime.now().toIso8601String(),
         personalityTraits: _personalityTraits,
         stressTriggers: _stressTriggers,
       );
@@ -607,12 +601,13 @@ class _HomePageState extends State<HomePage> {
       todayElement: todayElement,
       birthTimeLabel: birthTimeLabel,
       locationHint: _locationHint,
-      generatedReading: generatedReading,
+      generatedReading: generatedReading == null
+          ? null
+          : _formatReadingForDisplay(generatedReading),
     );
 
     setState(() {
       _progress = result.progress;
-      _unlockingWeeklyReading = false;
     });
     await _persistProgress();
 
@@ -638,10 +633,6 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() {
-      _unlockingMonthlyReading = true;
-    });
-
     String? generatedReading;
     try {
       generatedReading = await _assistantService.generatePremiumReading(
@@ -652,7 +643,7 @@ class _HomePageState extends State<HomePage> {
         userElement: userElement == null ? '' : formatElement(userElement!),
         todayElement: formatElement(todayElement),
         timezoneLabel: _locationHint,
-        currentDateLabel: _formattedTodayLine(),
+        currentDateLabel: DateTime.now().toIso8601String(),
         personalityTraits: _personalityTraits,
         stressTriggers: _stressTriggers,
       );
@@ -667,12 +658,13 @@ class _HomePageState extends State<HomePage> {
       todayElement: todayElement,
       birthTimeLabel: birthTimeLabel,
       locationHint: _locationHint,
-      generatedReading: generatedReading,
+      generatedReading: generatedReading == null
+          ? null
+          : _formatReadingForDisplay(generatedReading),
     );
 
     setState(() {
       _progress = result.progress;
-      _unlockingMonthlyReading = false;
     });
     await _persistProgress();
 
@@ -688,20 +680,6 @@ class _HomePageState extends State<HomePage> {
   Future<void> _sendAssistantQuestion() async {
     final question = _assistantController.text.trim();
     if (question.isEmpty) {
-      return;
-    }
-
-    final normalizedProgress = normalizeProgress(_progress, DateTime.now());
-    if (normalizedProgress.assistantUsedCount >= _assistantLimit) {
-      final message = _isGuestUser
-          ? 'Guest access allows one question each day. Sign in for three guided questions.'
-          : 'You have used all three assistant questions for today. Come back tomorrow for more guidance.';
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-      setState(() {
-        _progress = normalizedProgress;
-      });
       return;
     }
 
@@ -736,7 +714,7 @@ class _HomePageState extends State<HomePage> {
         isGuest: _isGuestUser,
         personalityTraits: _personalityTraits,
         stressTriggers: _stressTriggers,
-        conversationHistory: _recentAssistantHistory(),
+        conversationHistory: _conversationHistory,
       );
     } catch (_) {
       answer = result.answer;
@@ -750,60 +728,33 @@ class _HomePageState extends State<HomePage> {
     await _persistProgress();
   }
 
-  List<Map<String, String>> _recentAssistantHistory() {
-    final history = _assistantMessages.length > 6
-        ? _assistantMessages.sublist(_assistantMessages.length - 6)
-        : List<_AssistantMessage>.from(_assistantMessages);
-    return history
-        .map(
-          (message) => <String, String>{
-            'role': message.isUser ? 'user' : 'assistant',
-            'content': message.content,
-          },
-        )
-        .toList(growable: false);
-  }
-
   Future<void> _shareReadingCard({
-    required GlobalKey boundaryKey,
     required String fallbackText,
     required String subject,
+    required String shareType,
+    required String shareTitle,
+    required String shareDescription,
   }) async {
+    String shareText = fallbackText;
     try {
-      if (kIsWeb) {
-        await SharePlus.instance.share(
-          ShareParams(text: fallbackText, subject: subject),
+      String? shareUrl;
+      try {
+        shareUrl = await _assistantService.createShareLink(
+          shareType: shareType,
+          title: shareTitle,
+          description: shareDescription,
+          body: fallbackText,
         );
-        return;
+        shareText = '$shareUrl\n\n$fallbackText';
+      } catch (_) {
+        shareText = fallbackText;
       }
-
-      final boundary =
-          boundaryKey.currentContext?.findRenderObject()
-              as RenderRepaintBoundary?;
-      if (boundary == null) {
-        throw StateError('Share area not ready');
-      }
-
-      final image = await boundary.toImage(pixelRatio: 3);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      final bytes = byteData?.buffer.asUint8List();
-      if (bytes == null) {
-        throw StateError('Could not create image');
-      }
-
-      final directory = await getTemporaryDirectory();
-      final file = File('${directory.path}/$subject.png');
-      await file.writeAsBytes(bytes, flush: true);
 
       await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path)],
-          text: fallbackText,
-          subject: subject,
-        ),
+        ShareParams(text: shareText, subject: subject),
       );
     } catch (_) {
-      await Clipboard.setData(ClipboardData(text: fallbackText));
+      await Clipboard.setData(ClipboardData(text: shareText));
       if (!mounted) {
         return;
       }
@@ -819,7 +770,6 @@ class _HomePageState extends State<HomePage> {
 
   String _todayShareText() {
     return 'HanBit Today Guide\n'
-        '${_formattedTodayLine()}\n'
         '$myEnergy\n'
         'Today\'s element: ${formatElement(todayElement)}\n'
         '${_hanBitMessage()}';
@@ -835,6 +785,75 @@ class _HomePageState extends State<HomePage> {
         '${_progress.monthlyReading ?? 'Unlock a monthly reading with 180 coins.'}';
   }
 
+  String _readingExcerpt(String value, {int maxLength = 150}) {
+    final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+    return '${normalized.substring(0, maxLength - 1).trimRight()}...';
+  }
+
+  String _formatReadingForDisplay(String value) {
+    final trimmed = value.replaceAll('\r\n', '\n').trim();
+    if (trimmed.isEmpty) {
+      return trimmed;
+    }
+
+    final paragraphs = trimmed
+        .split(RegExp(r'\n\s*\n'))
+        .map((paragraph) => paragraph.replaceAll(RegExp(r'\s+'), ' ').trim())
+        .where((paragraph) => paragraph.isNotEmpty)
+        .toList(growable: false);
+
+    if (paragraphs.length >= 2) {
+      return paragraphs.join('\n\n');
+    }
+
+    final lines = trimmed
+        .split('\n')
+        .map((line) => line.replaceAll(RegExp(r'\s+'), ' ').trim())
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+
+    if (lines.length >= 2) {
+      return lines.join('\n\n');
+    }
+
+    final sentences = trimmed
+        .split(RegExp(r'(?<=[.!?])\s+'))
+        .map((sentence) => sentence.trim())
+        .where((sentence) => sentence.isNotEmpty)
+        .toList(growable: false);
+
+    if (sentences.length <= 2) {
+      return trimmed;
+    }
+
+    final targetParagraphs = sentences.length >= 5 ? 3 : 2;
+    final chunkSize = (sentences.length / targetParagraphs).ceil();
+    final parts = <String>[];
+
+    for (var index = 0; index < sentences.length; index += chunkSize) {
+      final part = sentences.skip(index).take(chunkSize).join(' ').trim();
+      if (part.isNotEmpty) {
+        parts.add(part);
+      }
+    }
+
+    return parts.join('\n\n');
+  }
+
+  AppProgress _normalizeStoredReadings(AppProgress progress) {
+    return progress.copyWith(
+      weeklyReading: progress.weeklyReading == null
+          ? null
+          : _formatReadingForDisplay(progress.weeklyReading!),
+      monthlyReading: progress.monthlyReading == null
+          ? null
+          : _formatReadingForDisplay(progress.monthlyReading!),
+    );
+  }
+
   Future<void> _editProfile() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -845,8 +864,6 @@ class _HomePageState extends State<HomePage> {
     DateTime? draftBirthDate = birthDate;
     String draftBirthDateLabel = birthDateLabel;
     String draftBirthTimeLabel = birthTimeLabel;
-    final draftPersonalityTraits = List<String>.from(_personalityTraits);
-    final draftStressTriggers = List<String>.from(_stressTriggers);
 
     final shouldSave = await showDialog<bool>(
       context: context,
@@ -920,124 +937,6 @@ class _HomePageState extends State<HomePage> {
                             : 'Birth Time: $draftBirthTimeLabel',
                       ),
                     ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Which traits describe you best?',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF2C2C2C),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: personalityTraitOptions
-                          .map((option) {
-                            final selected = draftPersonalityTraits.contains(
-                              option,
-                            );
-                            return FilterChip(
-                              label: Text(option),
-                              selected: selected,
-                              onSelected: (value) {
-                                setDialogState(() {
-                                  if (value) {
-                                    if (draftPersonalityTraits.length < 3) {
-                                      draftPersonalityTraits.add(option);
-                                    }
-                                  } else {
-                                    draftPersonalityTraits.remove(option);
-                                  }
-                                });
-                              },
-                              selectedColor: const Color(0xFFE9E2D2),
-                              checkmarkColor: const Color(0xFF2C2C2C),
-                              side: BorderSide(
-                                color: selected
-                                    ? const Color(0xFF789288)
-                                    : const Color(0xFFD8CFC1),
-                              ),
-                              labelStyle: TextStyle(
-                                color: selected
-                                    ? const Color(0xFF2C2C2C)
-                                    : const Color(0xFF5A5145),
-                                fontWeight: selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                            );
-                          })
-                          .toList(growable: false),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${draftPersonalityTraits.length}/3 selected (optional)',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: _mutedTextColor,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Which patterns tend to throw you off most?',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF2C2C2C),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: stressTriggerOptions
-                          .map((option) {
-                            final selected = draftStressTriggers.contains(
-                              option,
-                            );
-                            return FilterChip(
-                              label: Text(option),
-                              selected: selected,
-                              onSelected: (value) {
-                                setDialogState(() {
-                                  if (value) {
-                                    if (draftStressTriggers.length < 2) {
-                                      draftStressTriggers.add(option);
-                                    }
-                                  } else {
-                                    draftStressTriggers.remove(option);
-                                  }
-                                });
-                              },
-                              selectedColor: const Color(0xFFF2E8E4),
-                              checkmarkColor: const Color(0xFF2C2C2C),
-                              side: BorderSide(
-                                color: selected
-                                    ? const Color(0xFFC0846B)
-                                    : const Color(0xFFD8CFC1),
-                              ),
-                              labelStyle: TextStyle(
-                                color: selected
-                                    ? const Color(0xFF2C2C2C)
-                                    : const Color(0xFF5A5145),
-                                fontWeight: selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                            );
-                          })
-                          .toList(growable: false),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${draftStressTriggers.length}/2 selected (optional)',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: _mutedTextColor,
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1091,37 +990,13 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    if (draftPersonalityTraits.length > 3) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose up to 3 personality traits.')),
-      );
-      return;
-    }
-
-    if (draftStressTriggers.length > 2) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose up to 2 stress patterns.')),
-      );
-      return;
-    }
-
     try {
       setState(() {
         displayFirstName = nextName;
-        _personalityTraits = List<String>.from(draftPersonalityTraits);
-        _stressTriggers = List<String>.from(draftStressTriggers);
       });
 
       final updateData = <String, dynamic>{
         'firstName': nextName,
-        'personalityTraits': draftPersonalityTraits,
-        'stressTriggers': draftStressTriggers,
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
@@ -1233,15 +1108,12 @@ class _HomePageState extends State<HomePage> {
           setState(() {
             _selectedIndex = index;
           });
-          if (index == 3) {
-            _markUpdateNoticeSeen();
-          }
         },
         selectedItemColor: const Color(0xFF2C2C2C),
         unselectedItemColor: const Color(0xFF789288),
         backgroundColor: Colors.white,
         type: BottomNavigationBarType.fixed,
-        items: [
+        items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_rounded),
             label: 'Home',
@@ -1255,26 +1127,7 @@ class _HomePageState extends State<HomePage> {
             label: 'Assistant',
           ),
           BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.person_rounded),
-                if (_hasUnreadUpdateNotice)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFC44B3D),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: Colors.white, width: 1.4),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+            icon: Icon(Icons.person_rounded),
             label: 'Profile',
           ),
         ],
@@ -1283,8 +1136,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildHomeTab() {
-    final now = DateTime.now();
-
     return SingleChildScrollView(
       key: const ValueKey('home-tab'),
       physics: const BouncingScrollPhysics(
@@ -1296,7 +1147,7 @@ class _HomePageState extends State<HomePage> {
         children: [
           if (_showHomeUpdateBanner) ...[
             _buildUpdateBanner(),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
           ],
           Row(
             children: [
@@ -1320,14 +1171,14 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 8),
             const Text(
               'Loading your saved profile...',
-              style: TextStyle(fontSize: 14, color: _mutedTextColor),
+              style: TextStyle(fontSize: 15, color: _mutedTextColor),
             ),
           ],
           if (_syncingProgress) ...[
             const SizedBox(height: 4),
             const Text(
               'Syncing your coins and readings...',
-              style: TextStyle(fontSize: 13, color: _mutedTextColor),
+              style: TextStyle(fontSize: 14, color: _mutedTextColor),
             ),
           ],
           RepaintBoundary(
@@ -1379,54 +1230,16 @@ class _HomePageState extends State<HomePage> {
                     energyDescription,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 17,
                       height: 1.6,
                       color: energyAccent.withValues(alpha: 0.92),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.72),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: energyAccent.withValues(alpha: 0.14),
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          _formattedTodayLine(now),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF2C2C2C),
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _localTimeContext(now),
-                          style: TextStyle(
-                            fontSize: 13,
-                            height: 1.4,
-                            color: energyAccent.withValues(alpha: 0.88),
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
                   Text(
                     'Today\'s Element: ${formatElement(todayElement)} ${displayElementIcon(todayElement, '')}',
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 17,
                       fontWeight: FontWeight.w600,
                       color: energyAccent,
                     ),
@@ -1436,8 +1249,8 @@ class _HomePageState extends State<HomePage> {
                     _hanBitMessage(),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                      fontSize: 15,
-                      height: 1.5,
+                      fontSize: 17,
+                      height: 1.55,
                       color: Color(0xFF5C4B3B),
                     ),
                   ),
@@ -1467,9 +1280,11 @@ class _HomePageState extends State<HomePage> {
                 child: OutlinedButton.icon(
                   onPressed: () {
                     _shareReadingCard(
-                      boundaryKey: _todayShareKey,
                       fallbackText: _todayShareText(),
                       subject: 'hanbit_today_guide',
+                      shareType: 'today',
+                      shareTitle: 'HanBit Today Guide',
+                      shareDescription: _readingExcerpt(_hanBitMessage()),
                     );
                   },
                   icon: const Icon(Icons.share_outlined),
@@ -1590,7 +1405,7 @@ class _HomePageState extends State<HomePage> {
                 : 'Weekly attendance resets after day 7. Coins reset every new month.',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.88),
-              fontSize: 14,
+              fontSize: 15,
               height: 1.4,
             ),
           ),
@@ -1650,7 +1465,7 @@ class _HomePageState extends State<HomePage> {
                 'Create an account to start collecting attendance coins and unlock weekly or monthly readings.',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 14,
+                  fontSize: 15,
                   height: 1.5,
                 ),
               ),
@@ -1692,7 +1507,7 @@ class _HomePageState extends State<HomePage> {
                 : '50 coins: Weekly reading  •  180 coins: Monthly reading',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.88),
-              fontSize: 13,
+              fontSize: 14,
             ),
           ),
         ],
@@ -1714,17 +1529,20 @@ class _HomePageState extends State<HomePage> {
           cost: 50,
           accent: const Color(0xFFE6DCC8),
           buttonLabel: 'Unlock Weekly Reading',
-          onPressed: _unlockingWeeklyReading ? null : _unlockWeeklyReading,
+          onPressed: _unlockWeeklyReading,
           onShare: _progress.weeklyReading == null
               ? null
               : () {
                   _shareReadingCard(
-                    boundaryKey: _weeklyShareKey,
                     fallbackText: _weeklyShareText(),
                     subject: 'hanbit_weekly_reading',
+                    shareType: 'weekly',
+                    shareTitle: 'HanBit Weekly Reading',
+                    shareDescription: _readingExcerpt(
+                      _progress.weeklyReading ?? '',
+                    ),
                   );
                 },
-          isLoading: _unlockingWeeklyReading,
         ),
         const SizedBox(height: 16),
         _buildUnlockCard(
@@ -1735,17 +1553,20 @@ class _HomePageState extends State<HomePage> {
           cost: 180,
           accent: const Color(0xFFF1E1C7),
           buttonLabel: 'Unlock Monthly Reading',
-          onPressed: _unlockingMonthlyReading ? null : _unlockMonthlyReading,
+          onPressed: _unlockMonthlyReading,
           onShare: _progress.monthlyReading == null
               ? null
               : () {
                   _shareReadingCard(
-                    boundaryKey: _monthlyShareKey,
                     fallbackText: _monthlyShareText(),
                     subject: 'hanbit_monthly_reading',
+                    shareType: 'monthly',
+                    shareTitle: 'HanBit Monthly Reading',
+                    shareDescription: _readingExcerpt(
+                      _progress.monthlyReading ?? '',
+                    ),
                   );
                 },
-          isLoading: _unlockingMonthlyReading,
         ),
         const SizedBox(height: 16),
         _buildFiveElementExplorer(),
@@ -1761,9 +1582,8 @@ class _HomePageState extends State<HomePage> {
     required int cost,
     required Color accent,
     required String buttonLabel,
-    required VoidCallback? onPressed,
+    required VoidCallback onPressed,
     required VoidCallback? onShare,
-    required bool isLoading,
   }) {
     final lockedText = title == 'Weekly Reading'
         ? 'Unlock a short AI-style weekly energy reading. It uses your birth profile and current local rhythm.'
@@ -1831,7 +1651,9 @@ class _HomePageState extends State<HomePage> {
                 color: accent.withOpacity(0.38),
               ),
               child: Text(
-                reading ?? lockedText,
+                reading == null
+                    ? lockedText
+                    : _formatReadingForDisplay(reading),
                 style: const TextStyle(
                   fontSize: 15,
                   height: 1.55,
@@ -1854,16 +1676,7 @@ class _HomePageState extends State<HomePage> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  child: isLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(buttonLabel),
+                  child: Text(buttonLabel),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1890,7 +1703,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildGuideSummaryCard() {
-    final detailContent = _todayDetailContent();
     final profileMood = userElement == null
         ? 'Balanced, thoughtful, and open to insight'
         : _elementMoodLine(userElement!);
@@ -1898,73 +1710,18 @@ class _HomePageState extends State<HomePage> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFFFF7EB), Color(0xFFF1E3CA)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: const Color(0xFFFFF4E5),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE0CFB2)),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6F5A40).withValues(alpha: 0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _InfoChip(
-                icon: Icons.calendar_today_rounded,
-                label: _formattedTodayLine(),
-              ),
-              _InfoChip(icon: Icons.schedule_rounded, label: _locationHint),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.9),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFE6D2AE)),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  displayElementIcon(todayElement, ''),
-                  style: const TextStyle(fontSize: 24),
-                ),
-              ),
-              const SizedBox(width: 14),
-              const Expanded(
-                child: Text(
-                  'Today Guide Details',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF2C2C2C),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            detailContent.headline,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF3D3328),
+          const Text(
+            'Today Guide',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2C2C2C),
             ),
           ),
           const SizedBox(height: 10),
@@ -1976,113 +1733,52 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 8),
             Text(
               'Birth Date: $birthDateLabel',
-              style: const TextStyle(fontSize: 15, color: _mutedTextColor),
+              style: const TextStyle(fontSize: 16, color: _mutedTextColor),
             ),
           ],
           if (birthTimeLabel.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
               'Birth Time: $birthTimeLabel',
-              style: const TextStyle(fontSize: 15, color: _mutedTextColor),
+              style: const TextStyle(fontSize: 16, color: _mutedTextColor),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: const Color(0xFF2C2C2C),
-              borderRadius: BorderRadius.circular(20),
+              color: Colors.white.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(16),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Day pulse',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.78),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  recommendation['explanation'] as String? ?? _hanBitMessage(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    height: 1.45,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  detailContent.focus,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 14,
-                    height: 1.55,
-                  ),
-                ),
-              ],
+            child: Text(
+              recommendation['reasonLine'] as String? ??
+                  'Today favors simple, well-timed support.',
+              style: const TextStyle(
+                fontSize: 15,
+                height: 1.45,
+                color: Color(0xFF5A5145),
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _HighlightPanel(
-                  title: 'Focus',
-                  value: detailContent.focusLabel,
-                  accentColor: const Color(0xFF976B2D),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _HighlightPanel(
-                  title: 'Ritual',
-                  value: detailContent.ritualLabel,
-                  accentColor: const Color(0xFF6E8578),
-                ),
-              ),
-            ],
           ),
           const SizedBox(height: 14),
           _GuideCard(
             icon: Icons.restaurant,
-            title: 'K-Food',
+            title: 'Food',
             description: joinItems(recommendation['k'] as List<String>),
-            backgroundColor: Colors.white.withValues(alpha: 0.88),
+            backgroundColor: Colors.white,
           ),
           _GuideCard(
             icon: Icons.self_improvement,
-            title: 'Global Wellness',
+            title: 'Wellness',
             description: joinItems(recommendation['global'] as List<String>),
-            backgroundColor: Colors.white.withValues(alpha: 0.88),
-          ),
-          _GuideCard(
-            icon: Icons.medication_outlined,
-            title: 'Daily Support',
-            description: joinItems(
-              recommendation['supplement'] as List<String>,
-            ),
-            backgroundColor: Colors.white.withValues(alpha: 0.88),
+            backgroundColor: Colors.white,
           ),
           _GuideCard(
             icon: Icons.do_not_disturb_on_outlined,
             title: 'Avoid',
             description: joinItems(recommendation['avoid'] as List<String>),
-            backgroundColor: Colors.white.withValues(alpha: 0.88),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            detailContent.ritual,
-            style: const TextStyle(
-              fontSize: 14,
-              height: 1.5,
-              color: Color(0xFF6C5F50),
-            ),
+            backgroundColor: Colors.white,
           ),
         ],
       ),
@@ -2127,13 +1823,13 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 8),
           const Text(
             'Discover your natural tendencies and learn how to balance your life through the wisdom of the Five Elements.',
-            style: TextStyle(fontSize: 14, color: _mutedTextColor),
+            style: TextStyle(fontSize: 15, color: _mutedTextColor),
           ),
           const SizedBox(height: 4),
           const Text(
             "It's about making better daily decisions for a more harmonious you.",
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 15,
               color: _secondaryTextColor,
               height: 1.45,
             ),
@@ -2401,8 +2097,7 @@ class _HomePageState extends State<HomePage> {
                 minLines: 1,
                 maxLines: 3,
                 decoration: InputDecoration(
-                  hintText:
-                      'Ask about today\'s luck, mood, focus, relationships, or health rhythm...',
+                  hintText: 'Ask HanBit Assistant...',
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -2435,12 +2130,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildProfileTab() {
-    final updateStatus = _updateStatus;
-
     return ListView(
       key: const ValueKey('profile-tab'),
-      padding: const EdgeInsets.only(bottom: 24),
       children: [
+        if (_updateStatus != null && _updateStatus!.notices.isNotEmpty) ...[
+          _buildUpdateNoticeCard(),
+          const SizedBox(height: 16),
+        ],
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -2501,54 +2197,82 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ],
-              const SizedBox(height: 12),
-              const Text(
-                'My traits',
-                style: TextStyle(fontSize: 14, color: _mutedTextColor),
-              ),
-              const SizedBox(height: 8),
-              if (_personalityTraits.isEmpty)
+              if (_personalityTraits.isNotEmpty) ...[
+                const SizedBox(height: 18),
                 const Text(
-                  'Choose 3 traits in Edit Profile so HanBit can personalize your guidance more clearly.',
+                  'Personality Traits',
                   style: TextStyle(
-                    fontSize: 14,
-                    height: 1.45,
-                    color: Color(0xFF8B7D68),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2C2C2C),
                   ),
-                )
-              else
+                ),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: _personalityTraits
-                      .map((trait) => _buildProfileTag(trait))
+                      .map(
+                        (trait) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEAE6DD),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            trait,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Color(0xFF4F463C),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      )
                       .toList(growable: false),
                 ),
-              const SizedBox(height: 12),
-              const Text(
-                'What throws me off',
-                style: TextStyle(fontSize: 14, color: _mutedTextColor),
-              ),
-              const SizedBox(height: 8),
-              if (_stressTriggers.isEmpty)
+              ],
+              if (_stressTriggers.isNotEmpty) ...[
+                const SizedBox(height: 18),
                 const Text(
-                  'Choose 2 patterns in Edit Profile so HanBit can understand when your rhythm gets disrupted.',
+                  'Stress Patterns',
                   style: TextStyle(
-                    fontSize: 14,
-                    height: 1.45,
-                    color: Color(0xFF8B7D68),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2C2C2C),
                   ),
-                )
-              else
+                ),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: _stressTriggers
                       .map(
-                        (trigger) => _buildProfileTag(trigger, warning: true),
+                        (trigger) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF3E5D7),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            trigger,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Color(0xFF5A4A3A),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       )
                       .toList(growable: false),
                 ),
+              ],
               const SizedBox(height: 24),
               if (_isGuestUser) ...[
                 SizedBox(
@@ -2628,8 +2352,6 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        _buildProfileUpdateCard(updateStatus),
       ],
     );
   }
@@ -2641,85 +2363,77 @@ class _HomePageState extends State<HomePage> {
     }
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF6E6),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xFFE1C48A), width: 1.2),
+        color: const Color(0xFFFFF7E8),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE6C27A)),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.system_update_alt_rounded,
-                color: Color(0xFF7A5B14),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  status.title ?? 'A new version is available',
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.system_update_alt_rounded, color: Color(0xFF8A5A11)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  status.title ?? 'A new update is available',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF2C2C2C),
+                    color: Color(0xFF3F3424),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            status.message ??
-                'Update from Google Play to get the latest fixes and features.',
-            style: const TextStyle(
-              fontSize: 14,
-              height: 1.45,
-              color: Color(0xFF5A5145),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _openStoreListing,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2C2C2C),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                const SizedBox(height: 4),
+                Text(
+                  status.message ??
+                      'Update HanBit to get the latest fixes and features.',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: Color(0xFF5C4B33),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _openStoreListing,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2C2C2C),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 40),
+                      ),
+                      child: const Text('Update'),
                     ),
-                  ),
-                  child: const Text('Update in Google Play'),
-                ),
-              ),
-              if (!(status.requiresForceUpdate)) ...[
-                const SizedBox(width: 10),
-                TextButton(
-                  onPressed: _dismissHomeUpdateBanner,
-                  style: TextButton.styleFrom(
-                    foregroundColor: _secondaryTextColor,
-                  ),
-                  child: const Text('Later'),
+                    if (!status.requiresForceUpdate)
+                      TextButton(
+                        onPressed: _dismissHomeUpdateBanner,
+                        child: const Text('Later'),
+                      ),
+                  ],
                 ),
               ],
-            ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildProfileUpdateCard(UpdateStatus? status) {
-    final notices = status?.notices ?? const <UpdateNotice>[];
-
+  Widget _buildUpdateNoticeCard() {
+    final notices = _updateStatus?.notices ?? const <UpdateNotice>[];
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: Colors.white.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(24),
       ),
       child: Column(
@@ -2727,204 +2441,88 @@ class _HomePageState extends State<HomePage> {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.notifications_active_outlined,
-                color: Color(0xFF789288),
-              ),
-              const SizedBox(width: 10),
               const Expanded(
                 child: Text(
-                  'Update Notifications',
+                  'Update Notes',
                   style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                     color: Color(0xFF2C2C2C),
                   ),
                 ),
               ),
               if (_hasUnreadUpdateNotice)
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEFE9),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    'New',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFC44B3D),
-                    ),
+                  width: 10,
+                  height: 10,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE15B2D),
+                    shape: BoxShape.circle,
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 12),
           if (_loadingUpdateStatus) ...[
             const SizedBox(height: 10),
             const Text(
-              'Checking for the latest release...',
-              style: TextStyle(fontSize: 14, color: _mutedTextColor),
-            ),
-          ] else if (status == null) ...[
-            const SizedBox(height: 10),
-            const Text(
-              'Update notices are unavailable right now.',
+              'Checking for updates...',
               style: TextStyle(fontSize: 14, color: _mutedTextColor),
             ),
           ] else ...[
-            const SizedBox(height: 10),
-            Text(
-              status.hasUpdate
-                  ? 'A newer update is ready in Google Play.'
-                  : 'You already have the latest published update.',
-              style: const TextStyle(
-                fontSize: 14,
-                height: 1.45,
-                color: Color(0xFF5A5145),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (status.hasUpdate)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _openStoreListing,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2C2C2C),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+            const SizedBox(height: 12),
+            ...notices.map(
+              (notice) => Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8F4EC),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      notice.title,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2C2C2C),
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    status.requiresForceUpdate
-                        ? 'Required: Open Google Play'
-                        : 'Open Google Play',
-                  ),
+                    if ((notice.version ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Version ${notice.version}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF7A6C58),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 6),
+                    Text(
+                      notice.message,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.4,
+                        color: Color(0xFF5A5145),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            if (status.hasUpdate) const SizedBox(height: 16),
-            if (notices.isEmpty)
-              const Text(
-                'No release notes have been posted yet.',
-                style: TextStyle(fontSize: 14, color: _mutedTextColor),
-              )
-            else
-              ...notices.take(3).map(_buildUpdateNoticeTile),
+            ),
+            TextButton(
+              onPressed: () async {
+                await _markUpdateNoticeSeen();
+                await _openStoreListing();
+              },
+              child: const Text('Open Google Play'),
+            ),
           ],
         ],
       ),
     );
-  }
-
-  Widget _buildUpdateNoticeTile(UpdateNotice notice) {
-    final publishedLabel = _formatNoticeDate(notice.publishedAt);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F5EE),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE3DCCF)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  notice.title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF2C2C2C),
-                  ),
-                ),
-              ),
-              if (notice.force)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFEFE9),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Text(
-                    'Required',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFC44B3D),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          if (publishedLabel != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              publishedLabel,
-              style: const TextStyle(fontSize: 12, color: _mutedTextColor),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            notice.message,
-            style: const TextStyle(
-              fontSize: 14,
-              height: 1.45,
-              color: Color(0xFF5A5145),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileTag(String label, {bool warning = false}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: warning ? const Color(0xFFF4E9E4) : const Color(0xFFEAE6DE),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: warning ? const Color(0xFF8A5B4A) : const Color(0xFF5A5145),
-        ),
-      ),
-    );
-  }
-
-  String? _formatNoticeDate(DateTime? value) {
-    if (value == null) {
-      return null;
-    }
-    final month = _monthNames[value.month - 1];
-    return '$month ${value.day}, ${value.year}';
-  }
-
-  List<String> _stringListFromDynamic(Object? value) {
-    if (value is List) {
-      return value
-          .map((item) => item?.toString().trim() ?? '')
-          .where((item) => item.isNotEmpty)
-          .toList(growable: false);
-    }
-    return const <String>[];
   }
 
   String _hanBitMessage() {
@@ -2933,180 +2531,152 @@ class _HomePageState extends State<HomePage> {
     }
 
     final interaction = recommendation['interaction'] as String? ?? 'neutral';
-    switch (interaction) {
-      case 'boost':
-        return 'Today supports your flow. Trust a calm step forward and let momentum build naturally.';
-      case 'support':
-        return 'You may give more energy than usual today. Protect your pace and keep your center steady.';
-      case 'control':
-        return 'Do not force the day to bend too quickly. Clarity grows when you move with patience.';
-      case 'suppressed':
-        return 'Rest is not weakness today. Gentle choices will bring your balance back faster than pressure.';
-      default:
-        return 'Stay present with small rituals today. Even quiet care can shift the whole mood of the day.';
+    final dayState = recommendation['dayState'] as String? ?? 'steady';
+    final userName = formatElement(userElement!);
+    final dayName = formatElement(todayElement);
+    final daySeed =
+        DateTime.now().year * 1000 +
+        DateTime.now().month * 100 +
+        DateTime.now().day;
+    final leadOptions = switch (interaction) {
+      'boost' => <String>[
+        'Your $userName energy and today\'s $dayName flow are working in the same direction.',
+        'Today has a natural tailwind for your $userName energy.',
+        'The day opens with more support than resistance for you.',
+        'There is more forward motion available to you than usual today.',
+        'Your baseline energy lines up cleanly with the tone of the day.',
+      ],
+      'support' => <String>[
+        'You may spend more energy carrying the day than chasing it.',
+        'Today can pull you into a support role even if you did not ask for one.',
+        'Your energy is useful to the people and tasks around you today.',
+        'The day may ask for your steadiness more than your speed.',
+        'A lot can lean on you today if you do not set the pace yourself.',
+      ],
+      'control' => <String>[
+        'You will do better with precision than force today.',
+        'The day may resist your first instinct, so strategy matters more than speed.',
+        'This is a day for cleaner decisions, not louder effort.',
+        'Trying to control too much will cost more energy than it returns today.',
+        'Your best move is to narrow the field and act with intention.',
+      ],
+      'suppressed' => <String>[
+        'Your rhythm may feel slower today, but slower is not the same as worse.',
+        'The day can feel heavier on your system than it looks from the outside.',
+        'You may need to protect energy before you can use it well today.',
+        'Less friction matters more than more effort right now.',
+        'Today rewards conservation more than performance.',
+      ],
+      _ => <String>[
+        'The day is fairly neutral, which means your choices shape more than the weather does.',
+        'Nothing is pushing too hard in either direction today.',
+        'Today responds more to consistency than to intensity.',
+        'The tone of the day is open enough for your habits to matter.',
+        'This is a cleaner day to rely on rhythm rather than mood.',
+      ],
+    };
+    final stateOptions = switch (dayState) {
+      'restore' => <String>[
+        'Keep your plans lighter and protect recovery before urgency.',
+        'Feed and steady yourself earlier than usual.',
+        'Choose the version of the day your body can actually sustain.',
+        'A smaller cleaner plan will outperform a heroic one.',
+      ],
+      'focus' => <String>[
+        'Put your clearest task first and reduce decision noise.',
+        'Attention will hold better if you simplify inputs early.',
+        'One deliberate priority will serve you better than five loose ones.',
+        'Your mind wants clean structure more than extra stimulation.',
+      ],
+      'lift' => <String>[
+        'Stability matters more than intensity if your mood shifts quickly.',
+        'Choose grounding before reaching for stimulation.',
+        'Keep food, pace, and expectations steadier than usual.',
+        'A little emotional margin will help more than pushing through.',
+      ],
+      'spark' => <String>[
+        'Use the stronger energy early before it scatters.',
+        'Momentum is available, but it needs direction.',
+        'Channel the extra spark into one meaningful block.',
+        'Move first, then keep the rest of the day organized.',
+      ],
+      'cool' => <String>[
+        'Reduce heat, noise, and unnecessary stimulation where you can.',
+        'Calmer choices will carry farther than aggressive ones today.',
+        'Do less to cool the system before it gets louder.',
+        'Protect your attention from intensity creep.',
+      ],
+      _ => <String>[
+        'Simple repeatable habits are enough today.',
+        'Stay consistent instead of trying to force a breakthrough.',
+        'A steady rhythm will do most of the work for you.',
+        'Small well-timed actions are enough to shape the tone of the day.',
+      ],
+    };
+
+    final traitOptions = _personalityTraits
+        .map(
+          (trait) => switch (trait) {
+            'Analytical' =>
+              'Let clarity beat over-analysis once the next step is obvious.',
+            'Sensitive' =>
+              'Protect your nervous system from extra noise and intensity.',
+            'Calm' => 'Keep your own pace even if the day around you gets louder.',
+            'Curious' =>
+              'Keep novelty small so your attention does not split too far.',
+            'Driven' => 'Use structure to stop momentum from becoming self-pressure.',
+            'Warm' => 'Be generous without making yourself the last priority.',
+            'Independent' =>
+              'Reduce friction early so you do not have to brute-force the day alone.',
+            'Social' =>
+              'Leave a little room to reset after outward energy.',
+            'Cautious' =>
+              'Do the next clear thing instead of waiting for full certainty.',
+            'Creative' =>
+              'Capture ideas, but anchor them to one finished action.',
+            _ => '',
+          },
+        )
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    final stressOptions = _stressTriggers
+        .map(
+          (trigger) => switch (trigger) {
+            'Feeling rushed' =>
+              'Leave more margin than usual so rushed energy does not take over.',
+            'Conflict with others' =>
+              'Keep your side of the day calmer than the room around you.',
+            'Uncertainty' =>
+              'Repeat basics before you go looking for more answers.',
+            'Fear of failure' =>
+              'Do not let pressure decide what counts as enough today.',
+            'Emotional overwhelm' =>
+              'Keep the day simpler than your feelings want to make it.',
+            'Too much pressure' =>
+              'Treat steadiness as productive, not as a lesser option.',
+            'Putting things off' =>
+              'Start with the easiest meaningful action before the day gets heavier.',
+            'Overthinking' =>
+              'Come back to the body once your thoughts stop producing clarity.',
+            _ => '',
+          },
+        )
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+
+    String pick(List<String> options, int offset) {
+      return options[(daySeed + offset) % options.length];
     }
-  }
 
-  String _formattedTodayLine([DateTime? now]) {
-    final current = now ?? DateTime.now();
-    final weekday = _weekdayNames[current.weekday - 1];
-    final month = _monthNames[current.month - 1];
-    return '$weekday, $month ${current.day}, ${current.year}';
-  }
-
-  String _localTimeContext([DateTime? now]) {
-    final zone = (now ?? DateTime.now()).timeZoneName.trim();
-    if (zone.isEmpty) {
-      return 'Based on your local device date and time';
-    }
-    return 'Based on your local device time ($zone)';
-  }
-
-  _TodayDetailContent _todayDetailContent() {
-    final interaction = recommendation['interaction'] as String? ?? 'neutral';
-    final now = DateTime.now();
-    if (userElement == null) {
-      final neutralVariants = _buildBalancedDetailVariants();
-      final seed =
-          now.difference(DateTime(2024, 1, 1)).inDays + _weeklyCycleSeed(now);
-      return neutralVariants[seed % neutralVariants.length];
-    }
-
-    final variants = _buildPairDetailVariants(
-      userElement: userElement!,
-      todayElement: todayElement,
-      interaction: interaction,
-      now: now,
-    );
-    final seed =
-        now.difference(DateTime(2024, 1, 1)).inDays + _weeklyCycleSeed(now);
-    final pairOffset = (userElement!.index * 5) + todayElement.index;
-    return variants[(seed + pairOffset) % variants.length];
-  }
-
-  List<_TodayDetailContent> _buildBalancedDetailVariants() {
-    return const <_TodayDetailContent>[
-      _TodayDetailContent(
-        headline: 'Today is best handled with steady, uncomplicated choices.',
-        focus:
-            'Nothing dramatic is required. Small routines and clean decisions will do more than pushing for a breakthrough.',
-        focusLabel: 'Stay steady',
-        ritualLabel: 'Keep simple',
-        ritual:
-            'Use familiar meals, a clear schedule, and a small evening reset to keep the day feeling balanced.',
-      ),
-      _TodayDetailContent(
-        headline: 'The day favors balance over intensity.',
-        focus:
-            'A composed rhythm will help more than chasing extra stimulation or reacting too quickly.',
-        focusLabel: 'Balance',
-        ritualLabel: 'Stay light',
-        ritual:
-            'Let the day breathe. Leave white space between tasks so your mood stays cleaner and more stable.',
-      ),
-      _TodayDetailContent(
-        headline: 'A softer pace will reveal more than forcing the day.',
-        focus:
-            'Use the day to notice patterns, keep your energy even, and avoid taking on more than feels natural.',
-        focusLabel: 'Notice rhythm',
-        ritualLabel: 'Reset softly',
-        ritual:
-            'Choose one calming anchor such as tea, stretching, or a quiet walk before the evening ends.',
-      ),
-      _TodayDetailContent(
-        headline: 'Simple structure will make today feel cleaner and calmer.',
-        focus:
-            'If you keep your attention on one thing at a time, the whole day will feel more supportive.',
-        focusLabel: 'One thing',
-        ritualLabel: 'Clear space',
-        ritual:
-            'Tidy one corner of your environment or your schedule so the rest of the day feels easier to hold.',
-      ),
+    final segments = <String>[
+      pick(leadOptions, 0),
+      pick(stateOptions, 7),
+      if (traitOptions.isNotEmpty && daySeed.isEven) pick(traitOptions, 13),
+      if (stressOptions.isNotEmpty && daySeed % 3 != 0)
+        pick(stressOptions, 19),
     ];
-  }
 
-  List<_TodayDetailContent> _buildPairDetailVariants({
-    required OhaengElement userElement,
-    required OhaengElement todayElement,
-    required String interaction,
-    required DateTime now,
-  }) {
-    final userVoice = _elementVoices[userElement]!;
-    final dayVoice = _elementVoices[todayElement]!;
-    final relationVoice =
-        _relationVoices[interaction] ?? _relationVoices['neutral']!;
-    final seasonVoice = _seasonVoiceFor(now);
-    final pairVoice = _pairVoices[_pairKey(userElement, todayElement)]!;
-
-    return <_TodayDetailContent>[
-      _TodayDetailContent(
-        headline:
-            '${pairVoice.headline} Your ${userVoice.title.toLowerCase()} energy meets a ${dayVoice.title.toLowerCase()} day with ${relationVoice.headlineTone}.',
-        focus:
-            '${relationVoice.focusIntro} Let ${userVoice.gift} shape how you move, while today keeps asking for ${dayVoice.dayTone}. ${seasonVoice.focusAddon}',
-        focusLabel: relationVoice.focusLabel,
-        ritualLabel: userVoice.ritualLabel,
-        ritual:
-            'Start with ${userVoice.ritual}, then give extra room for ${dayVoice.resetNeed} so the day stays coherent. ${pairVoice.ritualHint}',
-      ),
-      _TodayDetailContent(
-        headline:
-            '${userVoice.title} and ${dayVoice.title} create a ${relationVoice.patternName.toLowerCase()} rhythm today. ${pairVoice.headline}',
-        focus:
-            'This pairing favors ${relationVoice.focusAction} more than intensity. Stay close to ${userVoice.center} and avoid letting ${dayVoice.drag} set the whole mood. ${seasonVoice.moodLine}',
-        focusLabel: dayVoice.focusLabel,
-        ritualLabel: relationVoice.ritualLabel,
-        ritual:
-            'Use ${dayVoice.ritualSupport} as a reset point, then return to one clear task before your energy scatters. ${pairVoice.ritualHint}',
-      ),
-      _TodayDetailContent(
-        headline:
-            'There is a distinct ${relationVoice.energyWord.toLowerCase()} between your ${userVoice.title.toLowerCase()} nature and today\'s ${dayVoice.title.toLowerCase()} flow. ${pairVoice.headline}',
-        focus:
-            'You will feel better if you trust ${userVoice.strengthPhrase} while adjusting to ${dayVoice.surfaceMood}. Keep the day practical enough that your body can stay with it. ${pairVoice.focusHint}',
-        focusLabel: userVoice.focusLabel,
-        ritualLabel: dayVoice.ritualLabel,
-        ritual:
-            'A small ritual like ${userVoice.eveningRitual} will help you absorb the day without carrying too much of it forward. ${seasonVoice.ritualAddon}',
-      ),
-      _TodayDetailContent(
-        headline:
-            'Today carries ${dayVoice.weatherImage}, while your ${userVoice.title.toLowerCase()} energy prefers ${userVoice.preferredWeather}. ${pairVoice.headline}',
-        focus:
-            '${relationVoice.boundaryLine} Build the day around ${userVoice.groundingAction}, and let ${dayVoice.opportunity} arrive without chasing it too hard. ${seasonVoice.focusAddon}',
-        focusLabel: relationVoice.altFocusLabel,
-        ritualLabel: 'Daily rhythm',
-        ritual:
-            'Keep meals, movement, and rest slightly more intentional than usual. That is where this ${userVoice.title.toLowerCase()} and ${dayVoice.title.toLowerCase()} pairing becomes easier. ${pairVoice.ritualHint}',
-      ),
-    ];
-  }
-
-  int _weeklyCycleSeed(DateTime now) {
-    return now.difference(DateTime(2024, 1, 1)).inDays ~/ 7;
-  }
-
-  String _pairKey(OhaengElement userElement, OhaengElement todayElement) {
-    return '${formatElement(userElement).toLowerCase()}_${formatElement(todayElement).toLowerCase()}';
-  }
-
-  _SeasonVoice _seasonVoiceFor(DateTime now) {
-    switch (now.month) {
-      case 3:
-      case 4:
-      case 5:
-        return _seasonVoices['spring']!;
-      case 6:
-      case 7:
-      case 8:
-        return _seasonVoices['summer']!;
-      case 9:
-      case 10:
-      case 11:
-        return _seasonVoices['autumn']!;
-      default:
-        return _seasonVoices['winter']!;
-    }
+    return segments.join(' ');
   }
 
   String _elementMoodLine(OhaengElement element) {
@@ -3231,136 +2801,32 @@ class _GuideCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Card(
+      color: backgroundColor,
+      elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE7D8BE)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5EAD7),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, color: const Color(0xFF789288)),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        leading: Icon(icon, color: const Color(0xFF789288), size: 24),
+        title: Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 17,
+            color: Color(0xFF2C2C2C),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: Color(0xFF2C2C2C),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  description,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.45,
-                    color: Color(0xFF5A5145),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.86),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFE0CFB2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: const Color(0xFF7D664A)),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF5A4B39),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HighlightPanel extends StatelessWidget {
-  const _HighlightPanel({
-    required this.title,
-    required this.value,
-    required this.accentColor,
-  });
-
-  final String title;
-  final String value;
-  final Color accentColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accentColor.withValues(alpha: 0.22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
-              color: accentColor,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            description,
             style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF2C2C2C),
+              fontSize: 15,
+              height: 1.45,
+              color: Color(0xFF5A5145),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3399,374 +2865,6 @@ class _ElementInsight {
   final String strengths;
   final String challenges;
   final String wellnessStrategy;
-}
-
-class _TodayDetailContent {
-  const _TodayDetailContent({
-    required this.headline,
-    required this.focus,
-    required this.focusLabel,
-    required this.ritualLabel,
-    required this.ritual,
-  });
-
-  final String headline;
-  final String focus;
-  final String focusLabel;
-  final String ritualLabel;
-  final String ritual;
-}
-
-class _ElementVoice {
-  const _ElementVoice({
-    required this.title,
-    required this.gift,
-    required this.dayTone,
-    required this.resetNeed,
-    required this.center,
-    required this.drag,
-    required this.ritual,
-    required this.ritualLabel,
-    required this.ritualSupport,
-    required this.focusLabel,
-    required this.strengthPhrase,
-    required this.eveningRitual,
-    required this.weatherImage,
-    required this.preferredWeather,
-    required this.groundingAction,
-    required this.opportunity,
-    required this.surfaceMood,
-  });
-
-  final String title;
-  final String gift;
-  final String dayTone;
-  final String resetNeed;
-  final String center;
-  final String drag;
-  final String ritual;
-  final String ritualLabel;
-  final String ritualSupport;
-  final String focusLabel;
-  final String strengthPhrase;
-  final String eveningRitual;
-  final String weatherImage;
-  final String preferredWeather;
-  final String groundingAction;
-  final String opportunity;
-  final String surfaceMood;
-}
-
-class _RelationVoice {
-  const _RelationVoice({
-    required this.headlineTone,
-    required this.focusIntro,
-    required this.focusLabel,
-    required this.altFocusLabel,
-    required this.ritualLabel,
-    required this.patternName,
-    required this.focusAction,
-    required this.energyWord,
-    required this.boundaryLine,
-  });
-
-  final String headlineTone;
-  final String focusIntro;
-  final String focusLabel;
-  final String altFocusLabel;
-  final String ritualLabel;
-  final String patternName;
-  final String focusAction;
-  final String energyWord;
-  final String boundaryLine;
-}
-
-class _PairVoice {
-  const _PairVoice({
-    required this.headline,
-    required this.focusHint,
-    required this.ritualHint,
-  });
-
-  final String headline;
-  final String focusHint;
-  final String ritualHint;
-}
-
-class _SeasonVoice {
-  const _SeasonVoice({
-    required this.focusAddon,
-    required this.moodLine,
-    required this.ritualAddon,
-  });
-
-  final String focusAddon;
-  final String moodLine;
-  final String ritualAddon;
-}
-
-const Map<OhaengElement, _ElementVoice> _elementVoices =
-    <OhaengElement, _ElementVoice>{
-      OhaengElement.wood: _ElementVoice(
-        title: 'Wood',
-        gift: 'clear initiative and fresh movement',
-        dayTone: 'forward motion and cleaner momentum',
-        resetNeed: 'space to breathe and redirect',
-        center: 'a sense of progress',
-        drag: 'impatience or scattered urgency',
-        ritual: 'one clear morning priority',
-        ritualLabel: 'Set intention',
-        ritualSupport: 'a brisk walk or a clean desk',
-        focusLabel: 'Initiative',
-        strengthPhrase: 'your instinct to begin',
-        eveningRitual: 'stretching or a short walk',
-        weatherImage: 'rising wind',
-        preferredWeather: 'steady growth',
-        groundingAction: 'beginning one useful thing early',
-        opportunity: 'new movement',
-        surfaceMood: 'movement and expansion',
-      ),
-      OhaengElement.fire: _ElementVoice(
-        title: 'Fire',
-        gift: 'warm expression and visible confidence',
-        dayTone: 'brightness, contact, and momentum',
-        resetNeed: 'cooling pauses and softer pacing',
-        center: 'a felt sense of connection',
-        drag: 'overheating, rushing, or reacting too fast',
-        ritual: 'a calm start before the day gets loud',
-        ritualLabel: 'Cool the pace',
-        ritualSupport: 'water, shade, or a slower lunch',
-        focusLabel: 'Expression',
-        strengthPhrase: 'your natural spark',
-        eveningRitual: 'dim lights and a quiet wind-down',
-        weatherImage: 'midday heat',
-        preferredWeather: 'steady warmth',
-        groundingAction: 'speaking clearly without oversharing',
-        opportunity: 'warm connection',
-        surfaceMood: 'heat and visibility',
-      ),
-      OhaengElement.earth: _ElementVoice(
-        title: 'Earth',
-        gift: 'grounding steadiness and patient care',
-        dayTone: 'stability, nourishment, and practical rhythm',
-        resetNeed: 'simple structure and real rest',
-        center: 'what feels dependable',
-        drag: 'heaviness, overthinking, or carrying too much',
-        ritual: 'a slower start with food or tea',
-        ritualLabel: 'Ground first',
-        ritualSupport: 'warm meals or a tidy routine',
-        focusLabel: 'Stability',
-        strengthPhrase: 'your ability to hold things calmly',
-        eveningRitual: 'a warm meal and an early pause',
-        weatherImage: 'late-summer stillness',
-        preferredWeather: 'predictable calm',
-        groundingAction: 'keeping the schedule realistic',
-        opportunity: 'steady progress',
-        surfaceMood: 'stability and density',
-      ),
-      OhaengElement.metal: _ElementVoice(
-        title: 'Metal',
-        gift: 'clarity, standards, and clean decisions',
-        dayTone: 'precision, order, and sharper judgment',
-        resetNeed: 'room, breath, and less pressure',
-        center: 'what feels clean and true',
-        drag: 'rigidity, self-criticism, or tension',
-        ritual: 'clearing one priority before distractions build',
-        ritualLabel: 'Refine focus',
-        ritualSupport: 'fresh air and a shorter to-do list',
-        focusLabel: 'Clarity',
-        strengthPhrase: 'your ability to refine what matters',
-        eveningRitual: 'fresh air and a digital pause',
-        weatherImage: 'crisp autumn air',
-        preferredWeather: 'clear skies',
-        groundingAction: 'editing down to essentials',
-        opportunity: 'cleaner decisions',
-        surfaceMood: 'clarity and sharpness',
-      ),
-      OhaengElement.water: _ElementVoice(
-        title: 'Water',
-        gift: 'intuition, depth, and reflective timing',
-        dayTone: 'quiet wisdom and emotional range',
-        resetNeed: 'warmth, stillness, and protected energy',
-        center: 'what feels inwardly true',
-        drag: 'withdrawal, fear, or low energy',
-        ritual: 'moving slowly enough to hear yourself think',
-        ritualLabel: 'Protect energy',
-        ritualSupport: 'warm drinks and quieter space',
-        focusLabel: 'Inner timing',
-        strengthPhrase: 'your ability to sense timing',
-        eveningRitual: 'a warm shower or quiet journaling',
-        weatherImage: 'deep water under a calm sky',
-        preferredWeather: 'warm shelter',
-        groundingAction: 'leaving margin in the day',
-        opportunity: 'quiet insight',
-        surfaceMood: 'depth and softness',
-      ),
-    };
-
-const Map<String, _RelationVoice> _relationVoices = <String, _RelationVoice>{
-  'boost': _RelationVoice(
-    headlineTone: 'natural support',
-    focusIntro:
-        'The day is largely working with you, so move with confidence without wasting the opening.',
-    focusLabel: 'Momentum',
-    altFocusLabel: 'Green light',
-    ritualLabel: 'Use the opening',
-    patternName: 'supportive pattern',
-    focusAction: 'clean movement',
-    energyWord: 'lift',
-    boundaryLine:
-        'You do not need to chase luck today; it responds better when you meet it halfway.',
-  ),
-  'support': _RelationVoice(
-    headlineTone: 'generous pull',
-    focusIntro:
-        'You may be feeding the day more than the day feeds you, so protect your pace on purpose.',
-    focusLabel: 'Protect pace',
-    altFocusLabel: 'Boundaries',
-    ritualLabel: 'Refill often',
-    patternName: 'supportive but draining pattern',
-    focusAction: 'measured contribution',
-    energyWord: 'output',
-    boundaryLine:
-        'Support what matters, but do not let the day consume your whole reserve.',
-  ),
-  'control': _RelationVoice(
-    headlineTone: 'controlled tension',
-    focusIntro:
-        'Your instinct may try to steer the day strongly, but better results will come from gentler pressure.',
-    focusLabel: 'Simplify',
-    altFocusLabel: 'Gentle control',
-    ritualLabel: 'Trim pressure',
-    patternName: 'directive pattern',
-    focusAction: 'restraint',
-    energyWord: 'tension',
-    boundaryLine:
-        'Keep your hands light on the day. Too much force will reduce the clarity you want.',
-  ),
-  'suppressed': _RelationVoice(
-    headlineTone: 'heavier weather',
-    focusIntro:
-        'The day may ask your system to soften and recover before it can fully respond.',
-    focusLabel: 'Recover',
-    altFocusLabel: 'Lower noise',
-    ritualLabel: 'Restore first',
-    patternName: 'pressured pattern',
-    focusAction: 'protection',
-    energyWord: 'drag',
-    boundaryLine:
-        'Lower the volume around your day and let steadiness matter more than output.',
-  ),
-  'neutral': _RelationVoice(
-    headlineTone: 'quiet balance',
-    focusIntro:
-        'Nothing extreme is required today, which makes small consistent choices unusually valuable.',
-    focusLabel: 'Stay steady',
-    altFocusLabel: 'Balance',
-    ritualLabel: 'Keep it simple',
-    patternName: 'balanced pattern',
-    focusAction: 'consistency',
-    energyWord: 'calm',
-    boundaryLine:
-        'A calmer rhythm is enough today. Let steadiness do more of the work.',
-  ),
-};
-
-final Map<String, _PairVoice> _pairVoices = <String, _PairVoice>{
-  for (final user in OhaengElement.values)
-    for (final today in OhaengElement.values)
-      '${formatElement(user).toLowerCase()}_${formatElement(today).toLowerCase()}':
-          _buildPairVoice(user, today),
-};
-
-const Map<String, _SeasonVoice> _seasonVoices = <String, _SeasonVoice>{
-  'spring': _SeasonVoice(
-    focusAddon:
-        'Spring energy makes beginnings feel more available than usual.',
-    moodLine: 'This season rewards clean starts and gentle forward motion.',
-    ritualAddon:
-        'A little fresh air or a walk outside will help the message of the day land better.',
-  ),
-  'summer': _SeasonVoice(
-    focusAddon:
-        'Summer can amplify emotion and momentum, so pacing matters more than usual.',
-    moodLine: 'Warm weather tends to magnify both enthusiasm and fatigue.',
-    ritualAddon:
-        'Hydration, shade, and shorter resets will do more for you right now than extra pressure.',
-  ),
-  'autumn': _SeasonVoice(
-    focusAddon:
-        'Autumn supports clearer decisions, trimming excess, and protecting your boundaries.',
-    moodLine: 'This season favors refinement over expansion.',
-    ritualAddon:
-        'A tidy space or slower evening transition will help the day settle into something useful.',
-  ),
-  'winter': _SeasonVoice(
-    focusAddon:
-        'Winter asks for conservation, warmth, and slightly more patience with your own energy.',
-    moodLine: 'This season tends to reward rest, depth, and quieter timing.',
-    ritualAddon:
-        'Warm meals, softer light, and a gentler ending will help your body absorb the day.',
-  ),
-};
-
-_PairVoice _buildPairVoice(OhaengElement user, OhaengElement today) {
-  final userLabel = formatElement(user);
-  final todayLabel = formatElement(today);
-  final relation = getInteraction(user, today);
-
-  final baseHeadline = switch (relation) {
-    'boost' => '$userLabel naturally receives today\'s $todayLabel tone.',
-    'support' => '$userLabel is feeding today\'s $todayLabel movement.',
-    'control' => '$userLabel may try to shape today\'s $todayLabel rhythm.',
-    'suppressed' => '$todayLabel can press down on your $userLabel rhythm.',
-    _ => '$userLabel and $todayLabel are moving in a quieter balance.',
-  };
-
-  final baseFocus = switch ((user, today)) {
-    (OhaengElement.wood, OhaengElement.fire) =>
-      'This pair favors initiative, visibility, and starting while the energy is warm.',
-    (OhaengElement.fire, OhaengElement.water) =>
-      'This pair can swing between heat and retreat, so emotional pacing matters.',
-    (OhaengElement.earth, OhaengElement.earth) =>
-      'This pair is strongest when your day stays simple, grounded, and practical.',
-    (OhaengElement.metal, OhaengElement.wood) =>
-      'This pair can feel sharp, so precision should stay softer than usual.',
-    (OhaengElement.water, OhaengElement.metal) =>
-      'This pair supports depth, reflection, and cleaner inner listening.',
-    (OhaengElement.wood, OhaengElement.water) =>
-      'This pair favors gentle recovery and a slower build into the day.',
-    (OhaengElement.fire, OhaengElement.earth) =>
-      'This pair can turn enthusiasm into real progress if you keep it structured.',
-    (OhaengElement.earth, OhaengElement.metal) =>
-      'This pair rewards consistency, refinement, and less emotional clutter.',
-    (OhaengElement.metal, OhaengElement.water) =>
-      'This pair often brings clearer thought and more intuitive timing together.',
-    (OhaengElement.water, OhaengElement.wood) =>
-      'This pair is good for beginnings that need patience more than force.',
-    _ =>
-      'This pair changes the texture of the day enough that small adjustments will be noticed.',
-  };
-
-  final baseRitual = switch ((user, today)) {
-    (OhaengElement.wood, OhaengElement.fire) =>
-      'Begin early, then protect your energy before momentum turns noisy.',
-    (OhaengElement.fire, OhaengElement.water) =>
-      'Alternate expression with cooling pauses so the day does not overheat.',
-    (OhaengElement.earth, OhaengElement.earth) =>
-      'Eat, organize, and move at a pace your body can actually keep.',
-    (OhaengElement.metal, OhaengElement.wood) =>
-      'Leave more space than you think you need before making the next decision.',
-    (OhaengElement.water, OhaengElement.metal) =>
-      'Choose one quiet ritual that helps insight become action.',
-    _ => 'Keep one simple ritual close so the day keeps a stable center.',
-  };
-
-  return _PairVoice(
-    headline: baseHeadline,
-    focusHint: baseFocus,
-    ritualHint: baseRitual,
-  );
 }
 
 class _InsightDetail extends StatelessWidget {
@@ -3896,7 +2994,7 @@ class _AssistantMascotState extends State<_AssistantMascot>
                 padding: EdgeInsets.all(widget.compact ? 10 : 16),
                 child: ClipOval(
                   child: Image.asset(
-                    'assets/branding/hanbit-app-icon-moonjar-v2.png',
+                    'assets/assistant_cat.png',
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return _AssistantMascotFallback(compact: widget.compact);
