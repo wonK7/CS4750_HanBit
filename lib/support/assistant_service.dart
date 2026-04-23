@@ -5,6 +5,8 @@ class AssistantService {
     : _functions = functions ?? FirebaseFunctions.instance;
 
   final FirebaseFunctions _functions;
+  static const playStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.wonk.hanbit';
 
   Future<String> askAssistant({
     required String question,
@@ -74,7 +76,7 @@ class AssistantService {
     throw Exception('Premium reading response was empty.');
   }
 
-  Future<String> createShareLink({
+  Future<ShareLinkResponse> createShareLink({
     required String shareType,
     required String title,
     required String description,
@@ -90,9 +92,27 @@ class AssistantService {
 
     final data = result.data;
     if (data is Map && data['url'] is String) {
-      return data['url'] as String;
+      final resolvedShareUrl = data['shareUrl'] is String
+          ? data['shareUrl'] as String
+          : data['url'] as String;
+      return ShareLinkResponse(
+        shareUrl: resolvedShareUrl,
+        playStoreUrl: data['playStoreUrl'] is String
+            ? data['playStoreUrl'] as String
+            : playStoreUrl,
+      );
     }
 
     throw Exception('Share link response was empty.');
   }
+}
+
+class ShareLinkResponse {
+  const ShareLinkResponse({
+    required this.shareUrl,
+    required this.playStoreUrl,
+  });
+
+  final String shareUrl;
+  final String playStoreUrl;
 }

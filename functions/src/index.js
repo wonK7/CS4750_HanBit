@@ -11,7 +11,7 @@ const openaiApiKey = defineSecret("OPENAI_API_KEY");
 const APP_BASE_URL = "https://hanbit-118ad.web.app";
 const APP_NAME = "HanBit";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.wonk.hanbit";
-const DEFAULT_SHARE_IMAGE = `${APP_BASE_URL}/icons/Icon-512.png`;
+const DEFAULT_SHARE_IMAGE = `${APP_BASE_URL}/share-preview.png`;
 const SHARE_COLLECTION = "shared_readings";
 
 if (!admin.apps.length) {
@@ -498,7 +498,9 @@ exports.createShareLink = onCall(
     });
 
     return {
-      url: `${APP_BASE_URL}/share/${docRef.id}`,
+      url: PLAY_STORE_URL,
+      shareUrl: `${APP_BASE_URL}/share/${docRef.id}`,
+      playStoreUrl: PLAY_STORE_URL,
     };
   },
 );

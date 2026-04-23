@@ -29,7 +29,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final TextEditingController _assistantController = TextEditingController();
   final List<_AssistantMessage> _assistantMessages = [];
   final GlobalKey _todayShareKey = GlobalKey();
@@ -65,6 +65,7 @@ class _HomePageState extends State<HomePage> {
   bool _homeUpdateBannerDismissed = false;
   bool _updateNoticeSeen = false;
   bool _forceUpdateDialogVisible = false;
+  bool _forceUpdateDismissed = false;
 
   static const Color _mutedTextColor = _globalMutedTextColor;
   static const Color _secondaryTextColor = _globalSecondaryTextColor;
@@ -85,6 +86,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     displayFirstName = widget.firstName;
     todayElement = getTodayElement();
     _loadMemberProfile();
@@ -93,8 +95,16 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _assistantController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadUpdateStatus();
+    }
   }
 
   Future<void> _loadMemberProfile() async {
@@ -160,6 +170,14 @@ class _HomePageState extends State<HomePage> {
       final bannerDismissed =
           latestVersion.isNotEmpty &&
           prefs.getBool(_updateBannerStorageKey(latestVersion)) == true;
+      final minimumSupportedVersion =
+          status.minimumSupportedVersion?.trim() ?? '';
+      final forceUpdateDismissed =
+          minimumSupportedVersion.isNotEmpty &&
+          prefs.getBool(
+                _forceUpdateDismissedStorageKey(minimumSupportedVersion),
+              ) ==
+              true;
 
       if (!mounted) {
         return;
@@ -169,9 +187,16 @@ class _HomePageState extends State<HomePage> {
         _updateStatus = status;
         _updateNoticeSeen = updateSeen;
         _homeUpdateBannerDismissed = bannerDismissed;
+        _forceUpdateDismissed = forceUpdateDismissed;
       });
 
-      if (status.requiresForceUpdate) {
+      if (!_shouldEnforceStoreUpdate && _forceUpdateDialogVisible) {
+        Navigator.of(context, rootNavigator: true).maybePop();
+      }
+
+      if (status.requiresForceUpdate &&
+          _shouldEnforceStoreUpdate &&
+          !_forceUpdateDismissed) {
         _showForceUpdateDialog();
       }
     } catch (_) {
@@ -190,6 +215,9 @@ class _HomePageState extends State<HomePage> {
   String _updateSeenStorageKey(String version) => 'update_seen_$version';
 
   String _updateBannerStorageKey(String version) => 'update_banner_$version';
+
+  String _forceUpdateDismissedStorageKey(String version) =>
+      'force_update_dismissed_$version';
 
   Future<void> _markUpdateNoticeSeen() async {
     final latestVersion = _updateStatus?.latestVersion?.trim() ?? '';
@@ -227,24 +255,75 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _dismissCurrentUpdateSurfaces() async {
+    final latestVersion = _updateStatus?.latestVersion?.trim() ?? '';
+    if (latestVersion.isEmpty) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_updateSeenStorageKey(latestVersion), true);
+    await prefs.setBool(_updateBannerStorageKey(latestVersion), true);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _updateNoticeSeen = true;
+      _homeUpdateBannerDismissed = true;
+    });
+  }
+
+  Future<void> _dismissForceUpdatePrompt() async {
+    final minimumSupportedVersion =
+        _updateStatus?.minimumSupportedVersion?.trim() ?? '';
+    if (minimumSupportedVersion.isEmpty) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(
+      _forceUpdateDismissedStorageKey(minimumSupportedVersion),
+      true,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _forceUpdateDismissed = true;
+    });
+  }
+
   Future<void> _openStoreListing() async {
     final status = _updateStatus;
     if (status == null) {
       return;
     }
 
+    await _dismissCurrentUpdateSurfaces();
+    await _dismissForceUpdatePrompt();
+
     final primaryUri = Uri.parse(status.effectivePlayStoreUrl);
     final marketUri = Uri.parse('market://details?id=${status.packageName}');
     var launched = false;
 
-    if (!kIsWeb && Theme.of(context).platform == TargetPlatform.android) {
+    if (kIsWeb) {
+      launched = await launchUrl(primaryUri);
+    } else if (Theme.of(context).platform == TargetPlatform.android) {
       launched = await launchUrl(
         marketUri,
         mode: LaunchMode.externalApplication,
       );
-    }
-
-    if (!launched) {
+      if (!launched) {
+        launched = await launchUrl(
+          primaryUri,
+          mode: LaunchMode.externalApplication,
+        );
+      }
+    } else {
       launched = await launchUrl(
         primaryUri,
         mode: LaunchMode.externalApplication,
@@ -255,11 +334,15 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not open Google Play right now.')),
       );
+      return;
     }
   }
 
   Future<void> _showForceUpdateDialog() async {
-    if (!mounted || _forceUpdateDialogVisible) {
+    if (!mounted ||
+        _forceUpdateDialogVisible ||
+        !_shouldEnforceStoreUpdate ||
+        _forceUpdateDismissed) {
       return;
     }
 
@@ -283,13 +366,28 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           actions: [
+            TextButton(
+              onPressed: () async {
+                await _dismissForceUpdatePrompt();
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+              },
+              child: const Text('Later'),
+            ),
             ElevatedButton(
-              onPressed: _openStoreListing,
+              onPressed: () async {
+                await _dismissForceUpdatePrompt();
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+                await _openStoreListing();
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2C2C2C),
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Open Google Play'),
+              child: Text(_updateActionLabel),
             ),
           ],
         );
@@ -739,15 +837,16 @@ class _HomePageState extends State<HomePage> {
     try {
       String? shareUrl;
       try {
-        shareUrl = await _assistantService.createShareLink(
+        final shareLink = await _assistantService.createShareLink(
           shareType: shareType,
           title: shareTitle,
           description: shareDescription,
           body: fallbackText,
         );
-        shareText = '$shareUrl\n\n$fallbackText';
+        shareUrl = shareLink.shareUrl;
+        shareText = '${shareLink.playStoreUrl}\n$shareUrl\n\n$fallbackText';
       } catch (_) {
-        shareText = fallbackText;
+        shareText = '${AssistantService.playStoreUrl}\n\n$fallbackText';
       }
 
       await SharePlus.instance.share(
@@ -2518,7 +2617,7 @@ class _HomePageState extends State<HomePage> {
                 await _markUpdateNoticeSeen();
                 await _openStoreListing();
               },
-              child: const Text('Open Google Play'),
+              child: Text(_updateActionLabel),
             ),
           ],
         ],
@@ -2535,12 +2634,24 @@ class _HomePageState extends State<HomePage> {
     return 'Latest version';
   }
 
+  bool get _shouldEnforceStoreUpdate =>
+      !kIsWeb && Theme.of(context).platform == TargetPlatform.android;
+
+  String get _updateActionLabel =>
+      _shouldEnforceStoreUpdate ? 'Open Google Play' : 'Open update page';
+
   String _noticeTitle(UpdateNotice notice, UpdateStatus? status) {
     final configuredTitle = notice.title.trim();
+    final noticeVersion = notice.version?.trim() ?? '';
+    final currentVersion = status?.currentVersionKey.trim() ?? '';
+    final isCurrentOrNewer =
+        noticeVersion.isNotEmpty &&
+        currentVersion.isNotEmpty &&
+        _compareVersionKeys(currentVersion, noticeVersion) >= 0;
     final usesDefaultLabel = configuredTitle == 'New update available' ||
         configuredTitle == 'Update available';
 
-    if (!(status?.hasUpdate ?? false) && usesDefaultLabel) {
+    if (isCurrentOrNewer || (!(status?.hasUpdate ?? false) && usesDefaultLabel)) {
       return 'Latest version';
     }
 
@@ -3163,4 +3274,31 @@ class _ElementOrbitPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+int _compareVersionKeys(String left, String right) {
+  final leftParts = _normalizeVersionKey(left);
+  final rightParts = _normalizeVersionKey(right);
+  final maxLength = leftParts.length > rightParts.length
+      ? leftParts.length
+      : rightParts.length;
+
+  for (var index = 0; index < maxLength; index++) {
+    final leftValue = index < leftParts.length ? leftParts[index] : 0;
+    final rightValue = index < rightParts.length ? rightParts[index] : 0;
+    if (leftValue != rightValue) {
+      return leftValue.compareTo(rightValue);
+    }
+  }
+
+  return 0;
+}
+
+List<int> _normalizeVersionKey(String value) {
+  final sections = value.split('+');
+  final semanticParts = sections.first
+      .split('.')
+      .map((part) => int.tryParse(part) ?? 0);
+  final buildNumber = sections.length > 1 ? int.tryParse(sections[1]) ?? 0 : 0;
+  return <int>[...semanticParts, buildNumber];
 }
