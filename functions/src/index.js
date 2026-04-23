@@ -10,6 +10,7 @@ const OpenAI = require("openai");
 const openaiApiKey = defineSecret("OPENAI_API_KEY");
 const APP_BASE_URL = "https://hanbit-118ad.web.app";
 const APP_NAME = "HanBit";
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.wonk.hanbit";
 const DEFAULT_SHARE_IMAGE = `${APP_BASE_URL}/icons/Icon-512.png`;
 const SHARE_COLLECTION = "shared_readings";
 
@@ -69,7 +70,7 @@ function buildShareHtml({
   body = "",
   imageUrl = DEFAULT_SHARE_IMAGE,
   canonicalUrl = APP_BASE_URL,
-  redirectUrl = APP_BASE_URL,
+  redirectUrl = PLAY_STORE_URL,
 }) {
   const safeTitle = escapeHtml(title);
   const safeDescription = escapeAttribute(description);
@@ -77,6 +78,7 @@ function buildShareHtml({
   const safeImageUrl = escapeAttribute(imageUrl);
   const safeCanonicalUrl = escapeAttribute(canonicalUrl);
   const safeRedirectUrl = escapeAttribute(redirectUrl);
+  const appStoreLabel = "Download on Google Play";
 
   return `<!doctype html>
 <html lang="en">
@@ -100,65 +102,120 @@ function buildShareHtml({
   <meta name="twitter:site" content="@HanBit">
   <link rel="canonical" href="${safeCanonicalUrl}">
   <link rel="icon" type="image/png" href="${safeImageUrl}">
-  <meta http-equiv="refresh" content="1;url=${safeRedirectUrl}">
-  <script>
-    setTimeout(function() {
-      window.location.replace(${JSON.stringify(redirectUrl)});
-    }, 900);
-  </script>
   <style>
     body {
       margin: 0;
       min-height: 100vh;
-      display: grid;
-      place-items: center;
       background: linear-gradient(180deg, #f6efe4 0%, #f0e2c7 100%);
       color: #2c2c2c;
       font-family: Arial, sans-serif;
-      text-align: center;
       padding: 24px;
     }
-    .card {
-      max-width: 420px;
-      background: rgba(255, 255, 255, 0.82);
-      border-radius: 24px;
-      padding: 24px;
+    .page {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .hero {
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 28px;
+      padding: 28px;
       box-shadow: 0 18px 40px rgba(74, 55, 23, 0.12);
+      text-align: center;
     }
-    img {
+    .hero img {
       width: 88px;
       height: 88px;
       border-radius: 24px;
       margin-bottom: 14px;
     }
+    .eyebrow {
+      margin: 0 0 8px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #8b7752;
+    }
     h1 {
       margin: 0;
-      font-size: 28px;
+      font-size: 30px;
     }
-    p {
-      margin: 10px 0 0;
-      line-height: 1.5;
+    .hero p {
+      margin: 12px auto 0;
+      max-width: 560px;
+      line-height: 1.6;
+      color: #5b5143;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .button {
+      display: inline-block;
+      padding: 13px 18px;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .button.primary {
+      background: #2c2c2c;
+      color: #ffffff;
+    }
+    .button.secondary {
+      background: rgba(240, 225, 197, 0.62);
+      color: #5f4e30;
+    }
+    .reading {
+      margin-top: 18px;
+      background: rgba(255, 255, 255, 0.84);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 16px 32px rgba(74, 55, 23, 0.1);
+    }
+    .reading h2 {
+      margin: 0 0 12px;
+      font-size: 22px;
     }
     .excerpt {
-      margin-top: 14px;
-      padding: 14px 16px;
+      padding: 18px 18px;
       border-radius: 18px;
       background: rgba(240, 225, 197, 0.45);
       text-align: left;
-      line-height: 1.6;
+      line-height: 1.75;
+      color: #3f372b;
+      white-space: normal;
     }
-    a {
-      color: #6b5a2f;
+    .footer {
+      margin-top: 14px;
+      font-size: 14px;
+      color: #6a604f;
+      line-height: 1.6;
     }
   </style>
 </head>
 <body>
-  <main class="card">
-    <img src="${safeImageUrl}" alt="HanBit">
-    <h1>${safeTitle}</h1>
-    <p>${safeDescription}</p>
-    ${safeBody ? `<div class="excerpt">${safeBody}</div>` : ""}
-    <p><a href="${safeRedirectUrl}">Open HanBit</a></p>
+  <main class="page">
+    <section class="hero">
+      <img src="${safeImageUrl}" alt="HanBit">
+      <p class="eyebrow">Shared from HanBit</p>
+      <h1>${safeTitle}</h1>
+      <p>${safeDescription}</p>
+      <div class="actions">
+        <a class="button primary" href="${safeRedirectUrl}">${appStoreLabel}</a>
+        <a class="button secondary" href="${safeCanonicalUrl}">Copy share link</a>
+      </div>
+    </section>
+    ${
+      safeBody
+        ? `<section class="reading">
+      <h2>Shared Reading</h2>
+      <div class="excerpt">${safeBody}</div>
+      <p class="footer">Read the full experience in the HanBit app for daily guidance, weekly and monthly readings, and a more personal Five Elements journey.</p>
+    </section>`
+        : ""
+    }
   </main>
 </body>
 </html>`;
@@ -415,8 +472,7 @@ exports.createShareLink = onCall(
     const normalizedBody = String(body || "").trim();
     const normalizedDescription =
       normalizeWhitespace(description) ||
-      shortenText(normalizedBody, 180) ||
-      "Gentle five-element wellness readings from HanBit.";
+      "Discover HanBit, a Korean-inspired wellness app for daily guidance and deeper Five Elements readings.";
 
     const docRef = admin.firestore().collection(SHARE_COLLECTION).doc();
     await docRef.set({
@@ -425,7 +481,7 @@ exports.createShareLink = onCall(
       description: normalizedDescription,
       body: normalizedBody,
       imageUrl: DEFAULT_SHARE_IMAGE,
-      redirectUrl: APP_BASE_URL,
+      redirectUrl: PLAY_STORE_URL,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -448,11 +504,11 @@ exports.sharePreview = onRequest(
     let payload = {
       title: APP_NAME,
       description:
-        "Korean-inspired five-element wellness readings for your day, week, and month.",
+        "Discover HanBit, a Korean-inspired wellness app for daily guidance and deeper Five Elements readings.",
       body: "",
       imageUrl: DEFAULT_SHARE_IMAGE,
       canonicalUrl: `${APP_BASE_URL}/share/${shareId}`,
-      redirectUrl: APP_BASE_URL,
+      redirectUrl: PLAY_STORE_URL,
     };
 
     if (shareId) {
