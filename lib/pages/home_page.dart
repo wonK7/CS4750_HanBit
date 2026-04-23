@@ -2133,10 +2133,6 @@ class _HomePageState extends State<HomePage> {
     return ListView(
       key: const ValueKey('profile-tab'),
       children: [
-        if (_updateStatus != null && _updateStatus!.notices.isNotEmpty) ...[
-          _buildUpdateNoticeCard(),
-          const SizedBox(height: 16),
-        ],
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -2352,6 +2348,10 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+        if (_updateStatus != null && _updateStatus!.notices.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildUpdateNoticeCard(),
+        ],
       ],
     );
   }
@@ -2382,7 +2382,7 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  status.title ?? 'A new update is available',
+                  _updateBannerTitle(status),
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -2430,6 +2430,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildUpdateNoticeCard() {
     final notices = _updateStatus?.notices ?? const <UpdateNotice>[];
+    final status = _updateStatus;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -2482,7 +2483,7 @@ class _HomePageState extends State<HomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      notice.title,
+                      _noticeTitle(notice, status),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -2523,6 +2524,33 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  String _updateBannerTitle(UpdateStatus status) {
+    if (status.hasUpdate) {
+      return status.title?.trim().isNotEmpty == true
+          ? status.title!.trim()
+          : 'New update available';
+    }
+    return 'Latest version';
+  }
+
+  String _noticeTitle(UpdateNotice notice, UpdateStatus? status) {
+    final configuredTitle = notice.title.trim();
+    final usesDefaultLabel = configuredTitle == 'New update available' ||
+        configuredTitle == 'Update available';
+
+    if (!(status?.hasUpdate ?? false) && usesDefaultLabel) {
+      return 'Latest version';
+    }
+
+    if (configuredTitle.isNotEmpty) {
+      return configuredTitle;
+    }
+
+    return (status?.hasUpdate ?? false)
+        ? 'New update available'
+        : 'Latest version';
   }
 
   String _hanBitMessage() {
