@@ -145,6 +145,11 @@ function buildShareHtml({
       line-height: 1.6;
       color: #5b5143;
     }
+    .subcopy {
+      margin-top: 14px;
+      font-size: 15px;
+      color: #6a604f;
+    }
     .actions {
       display: flex;
       gap: 12px;
@@ -178,6 +183,11 @@ function buildShareHtml({
       margin: 0 0 12px;
       font-size: 22px;
     }
+    .reading-intro {
+      margin: 0 0 14px;
+      color: #6a604f;
+      line-height: 1.6;
+    }
     .excerpt {
       padding: 18px 18px;
       border-radius: 18px;
@@ -202,17 +212,19 @@ function buildShareHtml({
       <p class="eyebrow">Shared from HanBit</p>
       <h1>${safeTitle}</h1>
       <p>${safeDescription}</p>
+      <p class="subcopy">HanBit is a Korean-inspired wellness app with daily guidance, weekly and monthly readings, and a more personal Five Elements experience.</p>
       <div class="actions">
         <a class="button primary" href="${safeRedirectUrl}">${appStoreLabel}</a>
-        <a class="button secondary" href="${safeCanonicalUrl}">Copy share link</a>
+        <a class="button secondary" href="${APP_BASE_URL}">Visit HanBit</a>
       </div>
     </section>
     ${
       safeBody
         ? `<section class="reading">
       <h2>Shared Reading</h2>
+      <p class="reading-intro">Someone shared this HanBit reading with you.</p>
       <div class="excerpt">${safeBody}</div>
-      <p class="footer">Read the full experience in the HanBit app for daily guidance, weekly and monthly readings, and a more personal Five Elements journey.</p>
+      <p class="footer">Download HanBit on Google Play to explore your Five Elements energy, unlock weekly and monthly readings, and receive more personal daily guidance.</p>
     </section>`
         : ""
     }
