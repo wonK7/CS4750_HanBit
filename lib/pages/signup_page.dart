@@ -67,7 +67,7 @@ class _SignUpPageState extends State<SignUpPage> {
       return;
     }
 
-    if (_birthDate == null || _birthTimeLabel.isEmpty) {
+    if ((_birthDate == null) != _birthTimeLabel.isEmpty) {
       _showMessage('Please choose both your birth date and birth time.');
       return;
     }
@@ -90,22 +90,31 @@ class _SignUpPageState extends State<SignUpPage> {
       final credential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(email: email, password: password);
 
-      final userElement = getUserElementFromBirthdate(_birthDate!);
+      final userElement = _birthDate == null
+          ? null
+          : getUserElementFromBirthdate(_birthDate!);
+      final profileData = <String, dynamic>{
+        'firstName': firstName,
+        'lastName': lastName,
+        'email': email,
+        'personalityTraits': _personalityTraits,
+        'stressTriggers': _stressTriggers,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      if (userElement != null) {
+        profileData.addAll({
+          'birthDate': Timestamp.fromDate(_birthDate!),
+          'birthTime': _birthTimeLabel,
+          'userElement': formatElement(userElement),
+          'symbol': displayElementIcon(userElement, '☯'),
+        });
+      }
+
       await FirebaseFirestore.instance
           .collection('users')
           .doc(credential.user!.uid)
-          .set({
-            'firstName': firstName,
-            'lastName': lastName,
-            'email': email,
-            'birthDate': Timestamp.fromDate(_birthDate!),
-            'birthTime': _birthTimeLabel,
-            'userElement': formatElement(userElement),
-            'symbol': displayElementIcon(userElement, '☯'),
-            'personalityTraits': _personalityTraits,
-            'stressTriggers': _stressTriggers,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
+          .set(profileData);
 
       if (!mounted) {
         return;
@@ -185,6 +194,14 @@ class _SignUpPageState extends State<SignUpPage> {
     });
   }
 
+  void _skipBirthInfo() {
+    setState(() {
+      _birthDate = null;
+      _birthDateLabel = '';
+      _birthTimeLabel = '';
+    });
+  }
+
   @override
   void dispose() {
     _firstNameController.dispose();
@@ -224,7 +241,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   decoration: InputDecoration(
                     labelText: 'First Name',
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.8),
+                    fillColor: Colors.white.withValues(alpha: 0.8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(15),
                       borderSide: BorderSide.none,
@@ -236,39 +253,78 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
                 const SizedBox(height: 15),
-                OutlinedButton(
-                  onPressed: _pickBirthDate,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF2C2C2C),
-                    backgroundColor: Colors.white.withOpacity(0.8),
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    side: BorderSide.none,
-                    shape: RoundedRectangleBorder(
+                TextField(
+                  controller: _lastNameController,
+                  decoration: InputDecoration(
+                    labelText: 'Last Name',
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.8),
+                    border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(15),
+                      borderSide: BorderSide.none,
                     ),
-                  ),
-                  child: Text(
-                    _birthDateLabel.isEmpty
-                        ? 'Choose Birth Date'
-                        : 'Birth Date: $_birthDateLabel',
+                    prefixIcon: const Icon(
+                      Icons.badge_outlined,
+                      color: Color(0xFF789288),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 15),
-                OutlinedButton(
-                  onPressed: _pickBirthTime,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF2C2C2C),
-                    backgroundColor: Colors.white.withOpacity(0.8),
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    side: BorderSide.none,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _pickBirthDate,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF2C2C2C),
+                          backgroundColor: Colors.white.withValues(alpha: 0.8),
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                        child: Text(
+                          _birthDateLabel.isEmpty
+                              ? 'Birth Date'
+                              : _birthDateLabel,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    _birthTimeLabel.isEmpty
-                        ? 'Choose Birth Time'
-                        : 'Birth Time: $_birthTimeLabel',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _pickBirthTime,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF2C2C2C),
+                          backgroundColor: Colors.white.withValues(alpha: 0.8),
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                        ),
+                        child: Text(
+                          _birthTimeLabel.isEmpty
+                              ? 'Birth Time'
+                              : _birthTimeLabel,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _skipBirthInfo,
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF789288),
+                    ),
+                    child: const Text('Skip for now'),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -363,29 +419,12 @@ class _SignUpPageState extends State<SignUpPage> {
                 ),
                 const SizedBox(height: 15),
                 TextField(
-                  controller: _lastNameController,
-                  decoration: InputDecoration(
-                    labelText: 'Last Name',
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.8),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: BorderSide.none,
-                    ),
-                    prefixIcon: const Icon(
-                      Icons.badge_outlined,
-                      color: Color(0xFF789288),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 15),
-                TextField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
                     labelText: 'Email',
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.8),
+                    fillColor: Colors.white.withValues(alpha: 0.8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(15),
                       borderSide: BorderSide.none,
@@ -407,7 +446,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   decoration: InputDecoration(
                     labelText: 'Password',
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.8),
+                    fillColor: Colors.white.withValues(alpha: 0.8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(15),
                       borderSide: BorderSide.none,
@@ -437,7 +476,7 @@ class _SignUpPageState extends State<SignUpPage> {
                   decoration: InputDecoration(
                     labelText: 'Confirm Password',
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.8),
+                    fillColor: Colors.white.withValues(alpha: 0.8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(15),
                       borderSide: BorderSide.none,
