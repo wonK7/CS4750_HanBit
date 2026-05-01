@@ -18,3 +18,6 @@ HanBit is a Flutter wellness app inspired by the five elements.
 - Cloud Firestore
 - Firebase Functions
 - OpenAI API (in progress)
+
+## Link
+- https://play.google.com/store/apps/details?id=com.wonk.hanbit
